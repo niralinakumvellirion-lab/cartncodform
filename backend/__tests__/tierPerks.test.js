@@ -228,3 +228,40 @@ describe('rewards carry upward', () => {
     expect(r.operations[0].deliveryDiscountsAdd.candidates[0].message).toBe('Free shipping');
   });
 });
+
+describe('tierSync combinesWith', () => {
+  const Store = require('../models/Store');
+  const DiscountConfig = require('../models/DiscountConfig');
+  const { syncTiers } = require('../services/tierSync');
+
+  async function combinesFor(combinesWith) {
+    Store.findOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ accessToken: 'shpat_x' }) }) });
+    DiscountConfig.findOne.mockReturnValue({ lean: () => Promise.resolve({ quantityTiers: { enabled: true, tiers: [{ minQty: 2, percent: 10 }], discountId: '', combinesWith } }) });
+    DiscountConfig.updateOne.mockResolvedValue({});
+    const bodies = [];
+    const replies = [
+      { data: { shop: { id: 'gid://shopify/Shop/1' } } },
+      { data: { metafieldsSet: { userErrors: [] } } },
+      { data: { shopifyFunctions: { nodes: [{ id: 'gid://shopify/ShopifyFunction/1', title: 'Quantity Tier Discount' }] } } },
+      { data: { discountAutomaticAppCreate: { automaticAppDiscount: { discountId: 'gid://x/1' }, userErrors: [] } } },
+    ];
+    global.fetch = jest.fn((url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(replies.shift() || { data: {} }) });
+    });
+    await syncTiers('demo.myshopify.com');
+    return bodies.find((b) => /discountAutomaticAppCreate/.test(b.query)).variables.discount.combinesWith;
+  }
+
+  beforeEach(() => jest.spyOn(console, 'warn').mockImplementation(() => {}));
+  afterEach(() => { jest.restoreAllMocks(); delete global.fetch; });
+
+  test('older stores without the setting still combine with nothing', async () => {
+    expect(await combinesFor(undefined)).toEqual({ productDiscounts: false, orderDiscounts: false, shippingDiscounts: false });
+  });
+
+  test('merchant choice is sent to Shopify', async () => {
+    expect(await combinesFor({ productDiscounts: true, shippingDiscounts: true }))
+      .toEqual({ productDiscounts: true, orderDiscounts: false, shippingDiscounts: true });
+  });
+});

@@ -11,6 +11,7 @@ const TOKEN_FIELDS =
 const {
   sanitizeTiers, sanitizeAccentColor, DEFAULT_ACCENT,
   LAYOUTS: TIER_LAYOUTS, sanitizeTierDisplay, DISCOUNT_TYPES: TIER_DISCOUNT_TYPES,
+  sanitizeCombinesWith,
 } = require('../utils/quantityTiers');
 const tierSync = require('../services/tierSync');
 
@@ -82,6 +83,7 @@ function defaultConfig(shop) {
       showTotal: true,
       showSingle: false,
       variantPicker: false,
+      combinesWith: { productDiscounts: false, orderDiscounts: false, shippingDiscounts: false },
       tiers: [
         { minQty: 2, percent: 10, badge: '', subtitle: '' },
         { minQty: 3, percent: 15, badge: 'Most popular', subtitle: '' },
@@ -674,6 +676,11 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
       }
       const display = sanitizeTierDisplay(qt);
       for (const k of Object.keys(display)) set[`quantityTiers.${k}`] = display[k];
+      // Combinations live on the Shopify discount itself, so a change needs a sync.
+      if (qt.combinesWith && typeof qt.combinesWith === 'object') {
+        set['quantityTiers.combinesWith'] = sanitizeCombinesWith(qt.combinesWith);
+        doTierSync = true;
+      }
       // The discount type and the tier values belong together (percent vs amount per tier), so a
       // type change must come with its tiers. Tiers sent alone are percent tiers (older clients).
       if (qt.discountType !== undefined) {

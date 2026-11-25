@@ -235,3 +235,20 @@ describe('variantPicker setting (Phase 2c)', () => {
     expect(set).not.toHaveProperty('quantityTiers.variantPicker');
   });
 });
+
+describe('combinesWith (Combinations)', () => {
+  const { sanitizeCombinesWith } = require('../utils/quantityTiers');
+
+  test('sanitize: only real true counts; missing = false', () => {
+    expect(sanitizeCombinesWith({ productDiscounts: true, orderDiscounts: 'yes', extra: true }))
+      .toEqual({ productDiscounts: true, orderDiscounts: false, shippingDiscounts: false });
+    expect(sanitizeCombinesWith()).toEqual({ productDiscounts: false, orderDiscounts: false, shippingDiscounts: false });
+  });
+
+  test('PATCH saves it and triggers a Shopify sync', async () => {
+    const tierSync = require('../services/tierSync');
+    const { set } = await runPatch({ combinesWith: { orderDiscounts: true } });
+    expect(set['quantityTiers.combinesWith']).toEqual({ productDiscounts: false, orderDiscounts: true, shippingDiscounts: false });
+    expect(tierSync.syncTiers).toHaveBeenCalled();
+  });
+});

@@ -200,6 +200,18 @@ function perksFor(tiers, qty) {
   return out;
 }
 
+/**
+ * Which other discounts the tier discount may combine with (Shopify's "Combinations").
+ * Missing / non-true values are false, so existing stores keep "combine with nothing".
+ * Shopify only combines two discounts when BOTH allow it.
+ */
+const COMBINE_KEYS = ['productDiscounts', 'orderDiscounts', 'shippingDiscounts'];
+function sanitizeCombinesWith(raw) {
+  const out = {};
+  for (const k of COMBINE_KEYS) out[k] = !!(raw && raw[k] === true);
+  return out;
+}
+
 /** True when any tier gives free shipping (the Shopify discount then needs the SHIPPING class). */
 function hasFreeShipping(tiers) {
   return Array.isArray(tiers) && tiers.some((t) => t && t.freeShipping === true);
@@ -230,5 +242,5 @@ module.exports = {
   sanitizeTiers, pickTier, discountedUnitPrice, sanitizeAccentColor, DEFAULT_ACCENT,
   LAYOUTS, normalizeLayout, sanitizeTierDisplay, publicTierDisplay, publicTiers,
   DISCOUNT_TYPES, normalizeDiscountType, tierTotal, tierSaving,
-  sanitizeGift, variantNumericId, hasFreeShipping, perksFor,
+  sanitizeGift, variantNumericId, hasFreeShipping, perksFor, sanitizeCombinesWith, COMBINE_KEYS,
 };

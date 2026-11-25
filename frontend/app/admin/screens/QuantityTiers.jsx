@@ -57,6 +57,13 @@ export function giftFromPick(picked) {
   return { variantId, title, image: /^https:\/\//.test(img) ? img : '' };
 }
 
+// Shopify "Combinations" for the tier discount (default: combine with nothing).
+export const COMBINE_OPTIONS = [
+  { key: 'productDiscounts', label: 'Other product discounts', example: '(e.g. a sale on one product)' },
+  { key: 'orderDiscounts', label: 'Order discounts', example: '(e.g. 10% off the whole order, popup codes)' },
+  { key: 'shippingDiscounts', label: 'Shipping discounts', example: '(e.g. free shipping over ₹999)' },
+];
+
 // How each tier discounts the bundle. 'amount' = a flat amount off the whole bundle.
 export const DISCOUNT_TYPES = [
   { value: 'percent', label: '% off each item' },
@@ -82,6 +89,11 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
   const [showTotal, setShowTotal] = useState(qt.showTotal !== false);
   const [showSingle, setShowSingle] = useState(qt.showSingle === true);
   const [variantPicker, setVariantPicker] = useState(qt.variantPicker === true);
+  const [combinesWith, setCombinesWith] = useState(() => ({
+    productDiscounts: !!(qt.combinesWith && qt.combinesWith.productDiscounts),
+    orderDiscounts: !!(qt.combinesWith && qt.combinesWith.orderDiscounts),
+    shippingDiscounts: !!(qt.combinesWith && qt.combinesWith.shippingDiscounts),
+  }));
   const [tiers, setTiers] = useState(() => initTiers(qt.tiers));
   const [discountType, setDiscountType] = useState(qt.discountType === 'amount' ? 'amount' : 'percent');
 
@@ -209,6 +221,7 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         showTotal,
         showSingle,
         variantPicker,
+        combinesWith,
         discountType,
         tiers: tiers.map((t) => ({
           minQty: Number(t.minQty),
@@ -596,6 +609,28 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
           Example: Buy 2 → item 1 Red / M, item 2 Blue / L. Shown only on products with options
           (up to 10 items). Each choice goes into the cart as its own line; the tier discount still counts them together.
         </p>
+      </div>
+
+      {/* ── Combinations with other discounts ── */}
+      <div style={styles.card} aria-label="Combinations">
+        <p style={styles.sectionLabel}>Combine with other discounts</p>
+        <p style={styles.hint}>
+          Off = shoppers get either this discount or your other discount, whichever saves them more.
+          Tick a box to let both apply together. Shopify only combines two discounts when both allow it,
+          so also tick &quot;Combinations&quot; on your other discount in Shopify &gt; Discounts.
+        </p>
+        {COMBINE_OPTIONS.map((opt) => (
+          <label key={opt.key} style={styles.radioLabel}>
+            <input
+              type="checkbox"
+              checked={combinesWith[opt.key]}
+              onChange={(e) => setCombinesWith((c) => ({ ...c, [opt.key]: e.target.checked }))}
+              aria-label={opt.label}
+            />
+            {opt.label}
+            <span style={styles.hint}>&nbsp;{opt.example}</span>
+          </label>
+        ))}
       </div>
 
       {/* ── Where it applies ── */}

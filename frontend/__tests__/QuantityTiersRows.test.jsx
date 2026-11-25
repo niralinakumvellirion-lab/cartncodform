@@ -239,3 +239,20 @@ describe('colour / size per item (Phase 2c)', () => {
     expect(body.variantPicker).toBe(true);
   });
 });
+
+describe('combine with other discounts', () => {
+  it('all off by default; ticked boxes are saved', async () => {
+    renderTiers();
+    const order = screen.getByLabelText('Order discounts');
+    expect(order).not.toBeChecked();
+    expect(screen.getByLabelText('Other product discounts')).not.toBeChecked();
+    fireEvent.click(order);
+    const body = await savedBody();
+    expect(body.combinesWith).toEqual({ productDiscounts: false, orderDiscounts: true, shippingDiscounts: false });
+  });
+
+  it('shows the saved choice', () => {
+    renderTiers({ combinesWith: { shippingDiscounts: true } });
+    expect(screen.getByLabelText('Shipping discounts')).toBeChecked();
+  });
+});

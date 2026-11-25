@@ -139,6 +139,12 @@ const discountConfigSchema = new mongoose.Schema({
     showTotal:     { type: Boolean, default: true },  // "Total: ₹X" line under the rows
     showSingle:    { type: Boolean, default: false }, // extra "1 item, standard price" row
     variantPicker: { type: Boolean, default: false }, // colour/size per item when buying 2+
+    // Shopify "Combinations": which other discounts this one may stack with (both must allow it).
+    combinesWith: {
+      productDiscounts:  { type: Boolean, default: false },
+      orderDiscounts:    { type: Boolean, default: false },
+      shippingDiscounts: { type: Boolean, default: false },
+    },
     tiers: {
       type: [{
         minQty:   { type: Number, required: true },

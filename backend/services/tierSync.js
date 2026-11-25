@@ -15,7 +15,7 @@
 const Store = require('../models/Store');
 const DiscountConfig = require('../models/DiscountConfig');
 const { API_VERSION, refreshAccessTokenIfNeeded } = require('../utils/shopify');
-const { hasFreeShipping } = require('../utils/quantityTiers');
+const { hasFreeShipping, sanitizeCombinesWith } = require('../utils/quantityTiers');
 
 // ── Token resolution ─────────────────────────────────────────────────────────
 
@@ -77,14 +77,14 @@ async function getFunctionId(shopDomain, token) {
 
 // ── Discount create / update / deactivate ────────────────────────────────────
 
-const COMBINES_WITH = { orderDiscounts: false, productDiscounts: false, shippingDiscounts: false };
+// Default "combine with nothing"; the merchant can allow combinations in the app (quantityTiers.combinesWith).
 
 // Title of the automatic discount in the merchant's Shopify Discounts list. Shopify needs it to be
 // unique per store, so the dev app (installed on the same test store as the live app) sets
 // TIER_DISCOUNT_TITLE in backend/.env.dev. The FUNCTION title looked up above never changes.
 const DISCOUNT_TITLE = (process.env.TIER_DISCOUNT_TITLE || '').trim().slice(0, 60) || 'Quantity Tier Discount';
 
-async function createDiscount(shopDomain, token, functionId, configJson, discountClasses = ['PRODUCT']) {
+async function createDiscount(shopDomain, token, functionId, configJson, discountClasses = ['PRODUCT'], combinesWith = sanitizeCombinesWith()) {
   const data = await gql(shopDomain, token, `
     mutation Create($discount: DiscountAutomaticAppInput!) {
       discountAutomaticAppCreate(automaticAppDiscount: $discount) {
@@ -98,7 +98,7 @@ async function createDiscount(shopDomain, token, functionId, configJson, discoun
       functionId,
       discountClasses,
       startsAt: new Date(Date.now() - 60000).toISOString(),
-      combinesWith: COMBINES_WITH,
+      combinesWith,
       metafields: [{
         namespace: 'cartncodform',
         key: 'function-configuration',
@@ -116,7 +116,7 @@ async function createDiscount(shopDomain, token, functionId, configJson, discoun
   return gid;
 }
 
-async function updateDiscount(shopDomain, token, discountId, functionId, configJson, discountClasses = ['PRODUCT']) {
+async function updateDiscount(shopDomain, token, discountId, functionId, configJson, discountClasses = ['PRODUCT'], combinesWith = sanitizeCombinesWith()) {
   const data = await gql(shopDomain, token, `
     mutation Update($id: ID!, $discount: DiscountAutomaticAppInput!) {
       discountAutomaticAppUpdate(id: $id, automaticAppDiscount: $discount) {
@@ -130,7 +130,7 @@ async function updateDiscount(shopDomain, token, discountId, functionId, configJ
       title: DISCOUNT_TITLE,
       functionId,
       discountClasses,
-      combinesWith: COMBINES_WITH,
+      combinesWith,
       metafields: [{
         namespace: 'cartncodform',
         key: 'function-configuration',
@@ -232,6 +232,7 @@ async function syncTiers(shopDomain) {
   // Free shipping on any tier → the discount also needs the SHIPPING class, so Shopify runs the
   // function's delivery target. Without it only product (line) discounts are applied.
   const discountClasses = hasFreeShipping(qt.tiers) ? ['PRODUCT', 'SHIPPING'] : ['PRODUCT'];
+  const combinesWith = sanitizeCombinesWith(qt.combinesWith);
 
   // ── Shop metafield — non-fatal ───────────────────────────────────────────
   try {
@@ -263,15 +264,15 @@ async function syncTiers(shopDomain) {
   let discountId;
   if (existingId) {
     try {
-      await updateDiscount(shopDomain, token, existingId, functionId, configJson, discountClasses);
+      await updateDiscount(shopDomain, token, existingId, functionId, configJson, discountClasses, combinesWith);
       discountId = existingId;
     } catch (err) {
       if (!isMissingDiscountError(err)) throw err;
       console.warn('[tierSync] saved discount no longer exists on Shopify - creating a new one');
-      discountId = await createDiscount(shopDomain, token, functionId, configJson, discountClasses);
+      discountId = await createDiscount(shopDomain, token, functionId, configJson, discountClasses, combinesWith);
     }
   } else {
-    discountId = await createDiscount(shopDomain, token, functionId, configJson, discountClasses);
+    discountId = await createDiscount(shopDomain, token, functionId, configJson, discountClasses, combinesWith);
   }
 
   await DiscountConfig.updateOne(
