@@ -53,6 +53,7 @@ export default function SizeFinderScreen({ shop }) {
   const layoutRef = useRef(null);
   const [fit, setFit] = useState({ scale: 1, height: 0 });
   const loaded = settings !== null;
+  const enabled = !!(settings && settings.enabled);
 
   // Keep the whole preview on screen and still (see fitScale). offsetHeight ignores the CSS zoom,
   // so it is the preview's natural height even while scaled.
@@ -78,7 +79,7 @@ export default function SizeFinderScreen({ shop }) {
       if (ro) ro.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [loaded]);
+  }, [loaded, enabled]); // the preview only exists while Find my size is on
 
   useEffect(() => {
     if (!shop) return;
@@ -168,7 +169,7 @@ export default function SizeFinderScreen({ shop }) {
   return (
     <div style={ui.page}>
       <style>{LAYOUT_CSS}</style>
-      <div className="sf-layout" ref={layoutRef}>
+      <div className={`sf-layout${settings.enabled ? '' : ' is-off'}`} ref={layoutRef}>
       <div className="sf-main">
       <div style={ui.head}>
         <div>
@@ -195,6 +196,19 @@ export default function SizeFinderScreen({ shop }) {
           </button>
         </span>
       </div>
+      {!settings.enabled ? (
+        <section style={ui.offCard} aria-label="Find my size is off">
+          <span style={ui.offIcon} aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z" /><path d="m7 12 2 2M10 9l2 2M13 6l2 2" /></svg>
+          </span>
+          <p style={ui.offTitle}>Find my size is off</p>
+          <p style={ui.offText}>
+            Turn it on to set up the size card, the size advisor and your size charts, with a live preview.
+            Shoppers won&apos;t see anything while it&apos;s off.
+          </p>
+          <button type="button" style={ui.save} onClick={() => set({ enabled: true })}>Turn on Find my size</button>
+        </section>
+      ) : (<>
       <section style={ui.card}>
         <SectionHead icon="pin" title="Where it shows" text="Every product that has a Size option. Add a tag to show it only on some products." />
         <label style={ui.field}>Only on products with this tag (optional)
@@ -433,6 +447,7 @@ export default function SizeFinderScreen({ shop }) {
         place="under the size picker"
         whenLive="Shoppers see the button once Find my size is turned on and saved."
       />
+      </>)}
 
       <div className="sf-savebar" style={ui.row}>
         <button type="button" onClick={save} disabled={saving} style={ui.save}>{saving ? 'Saving…' : 'Save'}</button>
@@ -440,6 +455,7 @@ export default function SizeFinderScreen({ shop }) {
         {error && <span style={ui.error} role="alert">{error}</span>}
       </div>
       </div>
+      {settings.enabled && (
       <aside className="sf-side" style={fit.height ? { height: Math.ceil(fit.height * fit.scale) } : undefined}>
         <div
           ref={fitRef}
@@ -449,6 +465,7 @@ export default function SizeFinderScreen({ shop }) {
           <SizeFinderPreview shop={shop} settings={settings} gender={gender} view={previewView} onViewChange={setPreviewView} />
         </div>
       </aside>
+      )}
       </div>
     </div>
   );
@@ -478,6 +495,7 @@ function SectionHead({ icon, title, text }) {
 const LAYOUT_CSS = `
 .sf-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:20px;align-items:start}
 .sf-layout{min-height:100vh}
+.sf-layout.is-off{grid-template-columns:minmax(0,720px);justify-content:center;min-height:0}
 .sf-main{display:flex;flex-direction:column;gap:16px;min-width:0;padding-bottom:40px}
 .sf-side{position:sticky;top:16px;min-width:0;overflow:visible}
 .sf-fit{transform-origin:top left}
@@ -534,6 +552,10 @@ const ui = {
   group: { fontSize: 11, fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase', color: '#8A8A8A', margin: '6px 0 8px' },
   toggles: { display: 'flex', flexDirection: 'column', gap: 8 },
   toggleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, background: '#F7F7F7', borderRadius: 10, padding: '10px 12px' },
+  offCard: { background: '#fff', border: '1px dashed #C9C9C9', borderRadius: 12, padding: '36px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },
+  offIcon: { width: 56, height: 56, borderRadius: '50%', background: '#F1F1F1', color: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  offTitle: { fontSize: 16, fontWeight: 600, margin: 0, color: '#303030' },
+  offText: { fontSize: 13.5, color: '#616161', margin: '0 0 6px', maxWidth: 440, lineHeight: 1.5 },
   tip: { fontSize: 12.5, color: '#616161', background: '#F7F7F7', borderRadius: 8, padding: '8px 12px', margin: '0 0 14px' },
   switchWrap: { display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 },
   switchText: { fontSize: 13, fontWeight: 600 },

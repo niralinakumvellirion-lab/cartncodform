@@ -8,7 +8,7 @@ import SizeFinderScreen, { toUnit, fromUnit } from '../app/admin/screens/SizeFin
 
 const SHOP = 'test.myshopify.com';
 const SETTINGS = {
-  enabled: false, productTag: '', buttonText: 'Find my size', accentColor: '#111827', unit: 'cm',
+  enabled: true, productTag: '', buttonText: 'Find my size', accentColor: '#111827', unit: 'cm',
   charts: {
     women: [{ size: 'S', chest: 86, waist: 71, length: 105 }, { size: 'M', chest: 91, waist: 76, length: 106 }],
     men: [{ size: 'M', chest: 97, waist: 83, length: 73 }],
@@ -45,9 +45,8 @@ describe('SizeFinder screen', () => {
     expect(screen.getByLabelText('Row 2 Chest')).toHaveValue(91);
   });
 
-  it('switch on, tag and button text are saved', async () => {
+  it('tag and button text are saved', async () => {
     await renderScreen();
-    fireEvent.click(screen.getByRole('switch', { name: 'Turn on Find my size' }));
     fireEvent.change(screen.getByLabelText('Product tag'), { target: { value: 'size-finder' } });
     fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Which size am I?' } });
     const s = await saved();
@@ -264,6 +263,32 @@ describe('size advisor words and options', () => {
     expect(screen.getByTestId('preview-frame')).toHaveTextContent('Select size M');
     const s = await saved();
     expect(s.options).toMatchObject({ liveEstimate: false, addToBag: false, rememberSize: true, sizeChart: true });
+  });
+});
+
+describe('on / off', () => {
+  it('Off: no settings and no preview, only a message; turning it on shows everything', async () => {
+    apiGet.mockResolvedValue({ settings: { ...JSON.parse(JSON.stringify(SETTINGS)), enabled: false } });
+    const { container } = render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByText('Find my size is off');
+    expect(screen.queryByLabelText('Product tag')).toBeNull();
+    expect(screen.queryByLabelText('Live preview')).toBeNull();
+    expect(container.querySelector('.sf-side')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Turn on Find my size' }));
+    expect(screen.getByLabelText('Product tag')).toBeInTheDocument();
+    expect(screen.getByLabelText('Live preview')).toBeInTheDocument();
+    const s = await saved();
+    expect(s.enabled).toBe(true);
+  });
+
+  it('switching Off hides everything and saves enabled: false', async () => {
+    await renderScreen();
+    fireEvent.click(screen.getByRole('switch', { name: 'Turn on Find my size' }));
+    expect(screen.queryByLabelText('Product tag')).toBeNull();
+    expect(screen.queryByLabelText('Live preview')).toBeNull();
+    const s = await saved();
+    expect(s.enabled).toBe(false);
   });
 });
 
