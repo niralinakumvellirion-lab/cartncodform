@@ -6,7 +6,7 @@
  */
 
 const TEXT_DEFAULTS = {
-  boxTitle: 'Sold out in this size',
+  boxTitle: 'Sorry, {size} is sold out',
   boxText: 'Get a message the moment it’s back.',
   buttonText: 'Notify me',
   emailPlaceholder: 'Your email',
@@ -21,6 +21,8 @@ const TEXT_DEFAULTS = {
   whatsappMessage: 'Hi! Good news — {product} ({size}) is back in stock. Get it here before it sells out: {link}',
   meterLabel: 'Alert priority',
   partialText: 'Done! Add {next} too to reach 100%.',
+  triggerText: 'Notify me when it’s back',
+  chanceLabel: 'Your chance to be notified',
 };
 
 const TEXT_MAX = {
@@ -39,6 +41,8 @@ const TEXT_MAX = {
   whatsappMessage: 300,
   meterLabel: 40,
   partialText: 90,
+  triggerText: 40,
+  chanceLabel: 50,
 };
 
 // Priority shown to shoppers when both WhatsApp and email are on: WhatsApp adds this %, email the rest.
@@ -122,6 +126,7 @@ function sanitizeSettings(input) {
     channels,
     emailDelayMinutes: cleanDelay(s.emailDelayMinutes),
     whatsappPercent: cleanPercent(s.whatsappPercent),
+    replaceBuyNow: s.replaceBuyNow !== false,
     accentColor: accent,
     buttonRadius: cleanRadius(s.buttonRadius),
     texts: cleanTexts(s.texts),
@@ -137,6 +142,7 @@ function withDefaults(doc) {
     channels: { push: ch.push !== false, email: ch.email !== false, whatsapp: ch.whatsapp === true },
     emailDelayMinutes: cleanDelay(d.emailDelayMinutes),
     whatsappPercent: cleanPercent(d.whatsappPercent),
+    replaceBuyNow: d.replaceBuyNow !== false,
     accentColor: HEX_RE.test(d.accentColor || '') ? d.accentColor : '#111827',
     buttonRadius: cleanRadius(d.buttonRadius),
     texts: { ...TEXT_DEFAULTS, ...cleanTexts(d.texts) },
@@ -151,6 +157,8 @@ function publicSettings(doc) {
     channels: s.channels,
     // Priority bar (only when WhatsApp and email are both on).
     percent: { whatsapp: s.whatsappPercent, email: 100 - s.whatsappPercent },
+    // Sold-out sizes: hide the theme's "Buy it now" so the Notify me button takes its place.
+    replaceBuyNow: s.replaceBuyNow,
     accentColor: s.accentColor,
     buttonRadius: s.buttonRadius,
     texts: {
@@ -164,6 +172,8 @@ function publicSettings(doc) {
       emailHint: (s.texts.emailHint || TEXT_DEFAULTS.emailHint).replace(/\{time\}/g, delayLabel(s.emailDelayMinutes)),
       meterLabel: s.texts.meterLabel || TEXT_DEFAULTS.meterLabel,
       partialText: s.texts.partialText || TEXT_DEFAULTS.partialText,
+      triggerText: s.texts.triggerText || TEXT_DEFAULTS.triggerText,
+      chanceLabel: s.texts.chanceLabel || TEXT_DEFAULTS.chanceLabel,
     },
   };
 }

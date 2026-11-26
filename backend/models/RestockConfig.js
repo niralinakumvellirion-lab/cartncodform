@@ -15,6 +15,8 @@ const RestockConfigSchema = new mongoose.Schema({
   emailDelayMinutes: { type: Number, default: 60 },
   // Priority bar: WhatsApp adds this %, email adds the rest (shown when both are on).
   whatsappPercent: { type: Number, default: 80 },
+  // Sold-out sizes: hide the theme's "Buy it now" so our Notify me button takes its place.
+  replaceBuyNow: { type: Boolean, default: true },
   accentColor: { type: String, default: '#111827' },
   buttonRadius: { type: Number, default: 8 },
   texts: { type: mongoose.Schema.Types.Mixed, default: {} },

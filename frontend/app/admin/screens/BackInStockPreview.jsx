@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 // Mirrors backend/utils/restock.js TEXT_DEFAULTS / TEXT_MAX and the storefront look (ccf-restock.js).
 export const RESTOCK_TEXT_DEFAULTS = {
-  boxTitle: 'Sold out in this size',
+  boxTitle: 'Sorry, {size} is sold out',
   boxText: 'Get a message the moment it’s back.',
   buttonText: 'Notify me',
   emailPlaceholder: 'Your email',
@@ -19,12 +19,14 @@ export const RESTOCK_TEXT_DEFAULTS = {
   whatsappMessage: 'Hi! Good news — {product} ({size}) is back in stock. Get it here before it sells out: {link}',
   meterLabel: 'Alert priority',
   partialText: 'Done! Add {next} too to reach 100%.',
+  triggerText: 'Notify me when it’s back',
+  chanceLabel: 'Your chance to be notified',
 };
 export const RESTOCK_TEXT_MAX = {
   boxTitle: 60, boxText: 90, buttonText: 30, emailPlaceholder: 40, successText: 90,
   pushTitle: 65, pushBody: 160, emailSubject: 90, emailBody: 400,
   whatsappPlaceholder: 40, whatsappHint: 80, emailHint: 80, whatsappMessage: 300,
-  meterLabel: 40, partialText: 90,
+  meterLabel: 40, partialText: 90, triggerText: 40, chanceLabel: 50,
 };
 /** WhatsApp share of the priority bar (0–100, default 80); email gets the rest. */
 export function whatsappPercent(v) {
@@ -69,13 +71,28 @@ function Icon({ children, size = 14 }) {
   );
 }
 
-/** Box states the preview can show. With WhatsApp + email: 0%, WhatsApp only, email only, both. */
+/** Box states the preview can show: the button, the open panel, and what each sign-up gives. */
 export function boxViews(channels, waPct) {
   const ch = channels || {};
   if (ch.whatsapp && ch.email) {
-    return [['form', 'Before · 0%'], ['wa', `WhatsApp · ${waPct}%`], ['em', `Email · ${100 - waPct}%`], ['done', 'Both · 100%']];
+    return [['closed', 'Button'], ['form', 'Open · 0%'], ['wa', `WhatsApp · ${waPct}%`], ['em', `Email · ${100 - waPct}%`], ['done', 'Both · 100%']];
   }
-  return [['form', 'Before'], ['done', 'After sign-up']];
+  return [['closed', 'Button'], ['form', 'Open · 0%'], ['done', 'Done · 100%']];
+}
+
+function Ring({ pct }) {
+  const R = 22;
+  const C = 2 * Math.PI * R;
+  return (
+    <span className="bp-ring" role="img" aria-label={`${pct}%`}>
+      <svg width="50" height="50" viewBox="0 0 56 56" aria-hidden="true">
+        <circle cx="28" cy="28" r={R} fill="none" stroke="#F1F1EF" strokeWidth="5" />
+        <circle cx="28" cy="28" r={R} fill="none" stroke="#16A34A" strokeWidth="5" strokeLinecap="round"
+          strokeDasharray={C.toFixed(1)} strokeDashoffset={(C * (1 - pct / 100)).toFixed(1)} transform="rotate(-90 28 28)" style={{ transition: 'stroke-dashoffset .6s' }} />
+      </svg>
+      <span className="bp-ringpct">{pct}%</span>
+    </span>
+  );
 }
 
 function Bell() {
@@ -102,76 +119,85 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
   const hl = (...keys) => (highlight && keys.includes(highlight.key) ? ' is-hl' : '');
   const ch = settings.channels || { push: true, email: true, whatsapp: false };
   const waPct = whatsappPercent(settings.whatsappPercent);
-  const meterOn = !!(ch.whatsapp && ch.email);
+  const both = !!(ch.whatsapp && ch.email);
+  const PCT = both ? { whatsapp: waPct, email: 100 - waPct } : ch.whatsapp ? { whatsapp: 100 } : ch.email ? { email: 100 } : { push: 100 };
   const views = boxViews(ch, waPct);
-  const view = views.some(([v]) => v === boxView) ? boxView : 'form';
-  const got = meterOn
-    ? { whatsapp: view === 'wa' || view === 'done', email: view === 'em' || view === 'done' }
-    : { all: view === 'done' };
-  const pct = (got.whatsapp ? waPct : 0) + (got.email ? 100 - waPct : 0);
-  const complete = meterOn ? got.whatsapp && got.email : got.all;
-  const partial = meterOn && !complete && pct > 0;
+  const view = views.some(([v]) => v === boxView) ? boxView : 'closed';
+  const got = view === 'done'
+    ? { whatsapp: ch.whatsapp, email: ch.email, push: !ch.whatsapp && !ch.email }
+    : { whatsapp: view === 'wa', email: view === 'em' };
+  const pct = Math.min(100, Object.keys(PCT).reduce((n, k) => n + (got[k] ? PCT[k] : 0), 0));
+  const complete = pct >= 100;
+  const isOpen = view !== 'closed';
+  // In the "open" state show WhatsApp picked (its field visible) to show the round selectors at work.
+  const picked = view === 'form' ? { whatsapp: ch.whatsapp, email: !ch.whatsapp && ch.email } : {};
   const tx = (k) => restockText(settings.texts, k, SAMPLE, {
     time: delayLabel(settings.emailDelayMinutes), next: got.whatsapp ? 'email' : 'WhatsApp', percent: pct,
   });
-  const showWa = ch.whatsapp && !got.whatsapp;
-  const showEmail = ch.email && !got.email;
-  const pushAlone = ch.push && !ch.whatsapp && !ch.email;
+
+  const option = (kind, channel, name, icon, badge, placeholderKey, hintKey, prefix) => {
+    const done = !!got[channel];
+    const on = !done && !!picked[channel];
+    return (
+      <div className={`bp-opt bp-opt-${kind}${on ? ' is-on' : ''}${done ? ' is-done' : ''}${hl(kind === 'wa' ? 'channelWhatsapp' : 'channelEmail')}`}>
+        <div className="bp-row">
+          <span className={`bp-chan bp-chan-${kind}`}><Icon>{icon}</Icon></span>
+          <span className="bp-name">{name}</span>
+          {badge && !done && <span className="bp-badge">{badge}</span>}
+          {done
+            ? <span className="bp-chip bp-added">Added</span>
+            : <span className={`bp-chip${kind === 'em' ? ' bp-chip-em' : ''}${hl('whatsappPercent')}`}>{PCT[channel] < 100 ? `+${PCT[channel]}%` : ''}</span>}
+          <span className="bp-radio">{done ? '✓' : null}</span>
+        </div>
+        {on && (
+          <div className="bp-field">
+            <div className={`bp-inputwrap${hl(placeholderKey)}`} style={{ borderRadius: radius }}>
+              {prefix && <span className="bp-cc">{prefix}</span>}
+              <span className="bp-input">{t(placeholderKey)}</span>
+            </div>
+            {hintKey && <span className={`bp-hint${hl(hintKey, hintKey === 'emailHint' ? 'emailDelayMinutes' : hintKey)}`}>{t(hintKey)}</span>}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const box = (
-    <div className={`bp-box${meterOn && complete ? ' is-full' : ''}${hl('accentColor')}`}>
-      <div className="bp-head">
-        <span className="bp-icon"><Bell /></span>
-        <span className="bp-copy">
-          <span className={`bp-title${hl('boxTitle')}`}>{t('boxTitle')}</span>
-          <span className={`bp-text${hl('boxText')}`}>{t('boxText')}</span>
-        </span>
-      </div>
-      {meterOn && (
-        <div className={`bp-meter${hl('whatsappPercent', 'meterLabel')}`} data-testid="preview-meter">
-          <div className="bp-meterrow"><span>{t('meterLabel')}</span><span className="bp-pct">{pct}%</span></div>
-          <div className="bp-bar"><span className="bp-fill" style={{ width: `${pct}%` }} /></div>
+    <div className={`bp-box${isOpen ? ' is-open' : ''}${complete ? ' is-full' : ''}`}>
+      <span className={`bp-trigger${hl('triggerText', 'accentColor', 'buttonRadius')}`} style={{ borderRadius: radius }}>
+        {complete ? <span aria-hidden="true">✓</span> : <Bell />}
+        <span className="bp-tlabel">{complete ? 'You’re on the list' : t('triggerText')}</span>
+        {pct > 0 && <span className="bp-tpct">{pct}%</span>}
+        <span className="bp-chev" aria-hidden="true">›</span>
+      </span>
+      {isOpen && (
+        <div className="bp-panel">
+          <div className="bp-top">
+            <span className="bp-thumb" />
+            <span className="bp-topcopy">
+              <span className={`bp-sold${hl('boxTitle')}`}>{t('boxTitle')}</span>
+              <span className={`bp-chance${hl('chanceLabel')}`}>{t('chanceLabel')}</span>
+            </span>
+            <span data-testid="preview-meter"><Ring pct={pct} /></span>
+          </div>
+          {complete ? (
+            <div className={`bp-done${hl('successText')}`}><span aria-hidden="true">✓</span>{t('successText')}</div>
+          ) : (<>
+            {pct > 0 && <div className={`bp-done bp-partial${hl('partialText')}`}><span aria-hidden="true">✓</span>{tx('partialText')}</div>}
+            {pct === 0 && <p className={`bp-text${hl('boxText')}`}>{t('boxText')}</p>}
+            {(ch.email || ch.whatsapp) && (
+              <div className="bp-opts">
+                {ch.email && option('em', 'email', 'Email', MAIL, '', 'emailPlaceholder', ch.whatsapp ? 'emailHint' : '', '')}
+                {ch.whatsapp && option('wa', 'whatsapp', 'WhatsApp', CHAT, 'Fastest', 'whatsappPlaceholder', 'whatsappHint', '+91')}
+              </div>
+            )}
+            {(ch.email || ch.whatsapp) && <span className={`bp-submit${hl('buttonText')}`}>{t('buttonText')}</span>}
+            {ch.push && (ch.email || ch.whatsapp)
+              ? <span className={`bp-pushlink${hl('channelPush')}`}><Icon size={13}><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></Icon> Also get a browser alert</span>
+              : ch.push && <span className={`bp-submit${hl('buttonText', 'channelPush')}`}>{t('buttonText')}</span>}
+          </>)}
         </div>
       )}
-      {complete ? (
-        <div className={`bp-done${hl('successText')}`}><span aria-hidden="true">✓</span>{t('successText')}</div>
-      ) : (<>
-        {partial && <div className={`bp-done bp-partial${hl('partialText')}`}><span aria-hidden="true">✓</span>{tx('partialText')}</div>}
-        <div className="bp-body">
-          {showWa && (
-            <div className={`bp-card bp-wa-card${hl('channelWhatsapp')}`}>
-              <div className="bp-cardhead">
-                <span className="bp-chan bp-chan-wa"><Icon>{CHAT}</Icon></span>
-                <span className="bp-cardtitle">WhatsApp</span>
-                <span className="bp-badge">Fastest</span>
-                {meterOn && <span className={`bp-chip${hl('whatsappPercent')}`}>+{waPct}%</span>}
-              </div>
-              <div className="bp-form">
-                <span className={`bp-input${hl('whatsappPlaceholder')}`} style={{ borderRadius: radius }}>{t('whatsappPlaceholder')}</span>
-                <span className={`bp-btn bp-wabtn${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
-              </div>
-              <span className={`bp-hint${hl('whatsappHint')}`}>{t('whatsappHint')}</span>
-            </div>
-          )}
-          {showEmail && (
-            <div className={`bp-card bp-em-card${hl('channelEmail')}`}>
-              <div className="bp-cardhead">
-                <span className="bp-chan bp-chan-em"><Icon>{MAIL}</Icon></span>
-                <span className="bp-cardtitle">Email</span>
-                {meterOn && <span className={`bp-chip bp-chip-em${hl('whatsappPercent')}`}>+{100 - waPct}%</span>}
-              </div>
-              <div className="bp-form">
-                <span className={`bp-input${hl('emailPlaceholder')}`} style={{ borderRadius: radius }}>{t('emailPlaceholder')}</span>
-                <span className={`bp-btn${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
-              </div>
-              {ch.whatsapp && <span className={`bp-hint${hl('emailHint', 'emailDelayMinutes')}`}>{t('emailHint')}</span>}
-            </div>
-          )}
-          {ch.push && (pushAlone
-            ? <span className={`bp-btn${hl('buttonText', 'buttonRadius', 'channelPush')}`} style={{ borderRadius: radius }}><Bell /> {t('buttonText')}</span>
-            : <span className={`bp-pushlink${hl('channelPush')}`}><Icon size={13}><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></Icon> Also get a browser alert</span>)}
-        </div>
-      </>)}
     </div>
   );
 
@@ -215,6 +241,7 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
                 {['S', 'M', 'L', 'XL'].map((s) => <span key={s} className={s === SAMPLE.size ? 'on' : s === 'XL' ? 'out' : ''}>{s}</span>)}
               </div>
               <span className="bp-soldout">Sold out</span>
+              {settings.replaceBuyNow === false && <span className="bp-buynow">Buy it now</span>}
               {box}
             </div>
           </div>
@@ -301,7 +328,36 @@ const CSS = `
 .bp-sizes span.on{border-color:#1A1A1A;box-shadow:inset 0 0 0 1px #1A1A1A;text-decoration:line-through;color:#8A8A8A}
 .bp-sizes span.out{text-decoration:line-through;color:#B0B0B0}
 .bp-soldout{display:block;text-align:center;padding:9px;border:1px solid #E3E3E3;border-radius:8px;font-size:13px;color:#8A8A8A;background:#FAFAFA}
-.bp-box{margin-top:12px;padding:13px;border:1px solid #E7E5E4;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.04),0 6px 18px rgba(16,24,40,.05)}
+.bp-box{margin-top:8px}
+.bp-buynow{display:block;text-align:center;margin-top:8px;padding:9px;border-radius:8px;background:#1A1A1A;color:#fff;font-size:13px;font-weight:600}
+.bp-trigger{display:flex;align-items:center;gap:8px;padding:11px 12px;background:var(--bp-accent);color:#fff;border:1px solid var(--bp-accent);font-size:13.5px;font-weight:600}
+.bp-tlabel{flex:1;min-width:0}
+.bp-tpct{font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.18)}
+.bp-chev{width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1;transition:transform .25s}
+.bp-box.is-open .bp-chev{transform:rotate(90deg)}
+.bp-box.is-full .bp-trigger{background:#fff;color:#15803D;border-color:#86EFAC}
+.bp-box.is-full .bp-chev,.bp-box.is-full .bp-tpct{background:#F0FDF4}
+.bp-panel{margin-top:8px;padding:12px;border:1px solid #E7E5E4;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.09)}
+.bp-top{display:flex;align-items:center;gap:10px}
+.bp-topcopy{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.bp-sold{font-size:11.5px;font-weight:600;color:#B42318}
+.bp-chance{font-size:13.5px;font-weight:650;line-height:1.3}
+.bp-ring{position:relative;width:50px;height:50px;display:inline-block;flex-shrink:0}
+.bp-ringpct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:750;color:#15803D}
+.bp-opts{margin-top:10px;border-top:1px solid #F0F0F0}
+.bp-opt{border-bottom:1px solid #F0F0F0}
+.bp-row{display:flex;align-items:center;gap:8px;padding:9px 2px}
+.bp-name{font-size:12.5px;font-weight:600}
+.bp-radio{width:18px;height:18px;border-radius:50%;border:2px solid #D4D4D8;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:#fff}
+.bp-opt.is-on .bp-radio{border-color:#16A34A;box-shadow:inset 0 0 0 3px #fff;background:#16A34A}
+.bp-opt-em.is-on .bp-radio{border-color:var(--bp-accent);background:var(--bp-accent)}
+.bp-opt.is-done .bp-radio{border-color:#16A34A;background:#16A34A}
+.bp-added{color:#15803D}
+.bp-field{padding:0 2px 10px;display:flex;flex-direction:column;gap:4px}
+.bp-inputwrap{display:flex;border:1px solid #D4D4D8;background:#fff;overflow:hidden}
+.bp-cc{display:flex;align-items:center;padding:0 8px;font-size:12px;font-weight:600;color:#3F3F46;background:#FAFAFA;border-right:1px solid #E4E4E7}
+.bp-inputwrap .bp-input{border:none;border-radius:0}
+.bp-submit{display:block;text-align:center;margin-top:10px;padding:10px;border-radius:999px;background:var(--bp-accent);color:#fff;font-size:13px;font-weight:650}
 .bp-head{display:flex;gap:10px;align-items:center}
 .bp-icon{width:36px;height:36px;border-radius:10px;background:color-mix(in srgb,var(--bp-accent) 8%,#fff);color:var(--bp-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .bp-meter{margin-top:11px}

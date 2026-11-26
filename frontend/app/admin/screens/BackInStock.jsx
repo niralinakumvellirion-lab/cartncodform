@@ -317,7 +317,23 @@ export default function BackInStockScreen({ shop }) {
             </section>
           ) : (<>
             <section style={ui.card} aria-label="Notify me box" {...focusArea('box')}>
-              <SectionHead icon="bell" title="“Notify me” box" text="Shows under Add to cart when the chosen size is sold out." />
+              <SectionHead icon="bell" title="“Notify me” button and panel" text="On a sold-out size: a Notify me button; its arrow opens a small panel with a % ring and Email / WhatsApp choices." />
+              <div style={{ ...ui.toggleRow, marginBottom: 14 }} data-hl="triggerText" data-hl-label="Replace Buy it now">
+                <span>
+                  <span style={ui.sectionTitle}>Replace “Buy it now”</span>
+                  <span style={{ ...ui.sectionText, fontSize: 12.5 }}>On a sold-out size, hide the theme’s Buy it now button so the Notify me button takes its place.</span>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.replaceBuyNow !== false}
+                  aria-label="Replace Buy it now"
+                  onClick={() => set({ replaceBuyNow: settings.replaceBuyNow === false })}
+                  style={{ ...ui.toggle, background: settings.replaceBuyNow !== false ? '#303030' : '#C9C9C9', flexShrink: 0 }}
+                >
+                  <span style={{ ...ui.knob, transform: settings.replaceBuyNow !== false ? 'translateX(20px)' : 'translateX(0)' }} />
+                </button>
+              </div>
               <p style={ui.group}>How shoppers get the alert</p>
               <div style={ui.toggles}>
                 {channelSwitch('whatsapp', 'WhatsApp · fastest', 'Shoppers leave their number. When the size is back we remind you at once, and you send it from this page in one tap.')}
@@ -374,9 +390,11 @@ export default function BackInStockScreen({ shop }) {
               )}
               <p style={{ ...ui.group, marginTop: 16 }}>Words</p>
               <div className="bis-grid2">
-                {textField('Heading', 'boxTitle')}
+                {textField('Button on the page', 'triggerText')}
+                {textField('Sold-out line', 'boxTitle', { hint: '{size} becomes the size, e.g. M' })}
+                {textField('Chance label', 'chanceLabel')}
                 {textField('Small text', 'boxText')}
-                {textField('Button text', 'buttonText')}
+                {textField('Panel button', 'buttonText')}
                 {textField('Email box hint', 'emailPlaceholder')}
               </div>
               {channels.whatsapp && (
@@ -384,7 +402,6 @@ export default function BackInStockScreen({ shop }) {
                   {textField('WhatsApp box hint', 'whatsappPlaceholder')}
                   {textField('WhatsApp note', 'whatsappHint')}
                   {channels.email && textField('Email note', 'emailHint', { hint: '{time} becomes your email wait, e.g. 1 hour' })}
-                  {channels.email && textField('Priority bar label', 'meterLabel')}
                   {channels.email && textField('After one option', 'partialText', { hint: '{next} becomes WhatsApp or email' })}
                 </div>
               )}

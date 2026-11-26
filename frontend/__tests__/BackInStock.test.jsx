@@ -111,7 +111,7 @@ describe('Back in stock screen', () => {
 
   test('edits words, colour, corners and channels, then saves', async () => {
     await renderScreen();
-    fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Alert me' } });
+    fireEvent.change(screen.getByLabelText('Panel button'), { target: { value: 'Alert me' } });
     fireEvent.change(screen.getByLabelText('Push title'), { target: { value: '{product} is here!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Round' }));
     fireEvent.change(screen.getByLabelText('Colour hex'), { target: { value: '#ff0000' } });
@@ -136,17 +136,17 @@ describe('Back in stock screen', () => {
     mockApi({ ...SETTINGS, enabled: false });
     await renderScreen();
     expect(screen.getByText('Back in stock is off')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Button text')).toBeNull();
+    expect(screen.queryByLabelText('Panel button')).toBeNull();
     expect(screen.queryByRole('region', { name: 'Live preview' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Turn on Back in stock' }));
-    expect(screen.getByLabelText('Button text')).toBeInTheDocument();
+    expect(screen.getByLabelText('Panel button')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Live preview' })).toBeInTheDocument();
     expect((await saved()).enabled).toBe(true);
   });
 
   test('preview updates as you type', async () => {
     await renderScreen();
-    fireEvent.change(screen.getByLabelText('Heading'), { target: { value: 'Gone for now' } });
+    fireEvent.change(screen.getByLabelText('Sold-out line'), { target: { value: 'Gone for now' } });
     expect(within(screen.getByTestId('preview-box')).getByText('Gone for now')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Push text'), { target: { value: 'Size {size} is back!' } });
     expect(within(screen.getByTestId('preview-messages')).getByText('Size M is back!')).toBeInTheDocument();
@@ -158,10 +158,10 @@ describe('Back in stock screen', () => {
     expect(screen.getByTestId('preview-messages')).toBeInTheDocument();
     expect(lit()).toHaveLength(0);
 
-    fireEvent.focus(screen.getByLabelText('Heading'));
+    fireEvent.focus(screen.getByLabelText('Sold-out line'));
     expect(screen.queryByTestId('preview-messages')).toBeNull();
-    expect(lit().map((e) => e.className.split(' ')[0])).toEqual(['bp-title']);
-    expect(screen.getByTestId('preview-editing')).toHaveTextContent('Editing: Heading');
+    expect(lit().map((e) => e.className.split(' ')[0])).toEqual(['bp-sold']);
+    expect(screen.getByTestId('preview-editing')).toHaveTextContent('Editing: Sold-out line');
 
     fireEvent.focus(screen.getByLabelText('After sign-up')); // switches the box to its "after" state
     expect(lit()[0].className).toContain('bp-done');
@@ -183,12 +183,21 @@ describe('Back in stock screen', () => {
 });
 
 describe('preview', () => {
-  test('email-only box: an email card, no bar, no push link, no WhatsApp bubble', () => {
+  test('email only: open panel with a 0% ring and the email option picked (field shown); no push, no bubble', () => {
     render(<BackInStockPreview settings={{ ...SETTINGS, channels: { push: false, email: true } }} />);
-    expect(document.querySelector('.bp-em-card')).not.toBeNull();
-    expect(document.querySelector('.bp-meter')).toBeNull();
+    expect(document.querySelector('.bp-trigger')).not.toBeNull();
+    expect(document.querySelector('.bp-ringpct').textContent).toBe('0%');
+    expect(document.querySelector('.bp-opt-em.is-on .bp-inputwrap')).not.toBeNull();
+    expect(document.querySelector('.bp-opt-em .bp-chip').textContent).toBe(''); // only channel = 100%, no +%
     expect(document.querySelector('.bp-pushlink')).toBeNull();
     expect(document.querySelector('.bp-notif')).toBeNull();
+  });
+
+  test('Button state shows only the Notify me button; Replace Buy it now off shows the theme button', () => {
+    render(<BackInStockPreview settings={{ ...SETTINGS, replaceBuyNow: false }} boxView="closed" />);
+    expect(document.querySelector('.bp-panel')).toBeNull();
+    expect(document.querySelector('.bp-tlabel').textContent).toBe('Notify me when it’s back');
+    expect(document.querySelector('.bp-buynow')).not.toBeNull();
   });
 });
 
@@ -207,19 +216,20 @@ describe('WhatsApp (seller sends by hand) and email wait', () => {
     expect(s.emailDelayMinutes).toBe(120);
   });
 
-  test('preview: WhatsApp card first (Fastest, +80%), email card (+20%, wait note), bar at 0%, WhatsApp bubble', async () => {
+  test('preview: Email and WhatsApp options with round selectors (+20% / +80%), ring at 0%, WhatsApp bubble', async () => {
     mockApi({ ...SETTINGS, channels: { push: true, email: true, whatsapp: true }, emailDelayMinutes: 240 });
     await renderScreen();
     const box = screen.getByTestId('preview-box');
     expect(within(box).getByText('Fastest')).toBeInTheDocument();
     expect(within(box).getByText('+80%')).toBeInTheDocument();
     expect(within(box).getByText('+20%')).toBeInTheDocument();
-    expect(within(box).getByText('WhatsApp number')).toBeInTheDocument();
-    expect(within(box).getByText('We email you within 4 hours of the restock')).toBeInTheDocument();
+    expect(within(box).getByText('WhatsApp number')).toBeInTheDocument(); // WhatsApp picked in the open state
+    expect(within(box).getByText('+91')).toBeInTheDocument();
     expect(within(box).getByText(/Also get a browser alert/)).toBeInTheDocument();
     expect(within(screen.getByTestId('preview-meter')).getByText('0%')).toBeInTheDocument();
-    const cards = Array.from(box.querySelectorAll('.bp-card')).map((e) => e.className);
-    expect(cards[0]).toContain('bp-wa-card');
+    const opts = Array.from(box.querySelectorAll('.bp-opt')).map((e) => e.className);
+    expect(opts[0]).toContain('bp-opt-em');
+    expect(opts[1]).toContain('bp-opt-wa');
     const msgs = screen.getByTestId('preview-messages');
     expect(within(msgs).getByText(/Cotton Kurta \(M\) is back in stock/)).toBeInTheDocument();
     expect(within(msgs).getByText('WhatsApp · you send it')).toBeInTheDocument();
@@ -255,8 +265,9 @@ describe('priority split (WhatsApp % / email %)', () => {
     const box = screen.getByTestId('preview-box');
     expect(within(screen.getByTestId('preview-meter')).getByText('80%')).toBeInTheDocument();
     expect(within(box).getByText('Done! Add email too to reach 100%.')).toBeInTheDocument();
-    expect(box.querySelector('.bp-wa-card')).toBeNull();
-    expect(box.querySelector('.bp-em-card')).not.toBeNull();
+    expect(box.querySelector('.bp-opt-wa.is-done')).not.toBeNull();
+    expect(box.querySelector('.bp-opt-em:not(.is-done)')).not.toBeNull();
+    expect(within(box).getAllByText('80%')).toHaveLength(2); // ring + the button's % pill
 
     fireEvent.click(within(states).getByRole('button', { name: 'Email · 20%' }));
     expect(within(screen.getByTestId('preview-meter')).getByText('20%')).toBeInTheDocument();
@@ -265,7 +276,8 @@ describe('priority split (WhatsApp % / email %)', () => {
     fireEvent.click(within(states).getByRole('button', { name: 'Both · 100%' }));
     expect(within(screen.getByTestId('preview-meter')).getByText('100%')).toBeInTheDocument();
     expect(within(box).getByText('Done! We’ll tell you when M is back.')).toBeInTheDocument();
-    expect(box.querySelector('.bp-card')).toBeNull();
+    expect(box.querySelector('.bp-opt')).toBeNull();
+    expect(within(box).getByText('You’re on the list')).toBeInTheDocument();
   });
 
   test('changing the split: WhatsApp % box and email % box stay at 100 together; saved', async () => {
@@ -276,10 +288,12 @@ describe('priority split (WhatsApp % / email %)', () => {
     expect(within(screen.getByTestId('preview-box')).getByText('+70%')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Email priority in percent'), { target: { value: '40' } });
     expect(screen.getByLabelText('WhatsApp priority in percent')).toHaveValue(60);
-    fireEvent.change(screen.getByLabelText('Priority bar label'), { target: { value: 'Your priority' } });
+    fireEvent.change(screen.getByLabelText('Chance label'), { target: { value: 'Your odds' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Replace Buy it now' }));
     const s = await saved();
     expect(s.whatsappPercent).toBe(60);
-    expect(s.texts.meterLabel).toBe('Your priority');
+    expect(s.texts.chanceLabel).toBe('Your odds');
+    expect(s.replaceBuyNow).toBe(false);
   });
 
   test('editing the split shows the WhatsApp-only state in the preview', async () => {

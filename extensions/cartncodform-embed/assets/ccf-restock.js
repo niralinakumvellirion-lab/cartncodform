@@ -1,11 +1,12 @@
 /* ccf-restock.js — "Back in stock", CartnCodForm.
-   Classes prefixed .ccf-bis-*. Shows a "Notify me" box when the chosen variant is sold out.
-   Options are cards: WhatsApp (fastest — the seller sends it by hand), email (sent a little later),
-   and a small "browser alert" (push, via window.CCFPush from ccf-push.js).
-   When WhatsApp and email are both on, a priority bar fills up: WhatsApp adds settings.percent.whatsapp,
-   email adds the rest; both = 100%. What the shopper signed up for is remembered per size.
-   Settings from the App Proxy (GET /apps/cartncodform/restock/config); requests go to
-   POST /apps/cartncodform/restock/subscribe. The admin preview (BackInStockPreview.jsx) mirrors this look. */
+   Classes prefixed .ccf-bis-*. On a sold-out size the theme's "Buy it now" is hidden (setting
+   replaceBuyNow) and a full-width "Notify me" button with an arrow takes its place. The arrow opens a
+   small panel: product photo, "Sorry, M is sold out", "Your chance to be notified" with a % ring, and
+   round selectors for Email and WhatsApp (both can be picked; each shows its field). One "Notify me"
+   sends them. WhatsApp adds settings.percent.whatsapp, email the rest (just one channel on = 100%).
+   What the shopper signed up for is remembered per size. Push (window.CCFPush, from ccf-push.js) is a
+   small extra link. Settings: GET /apps/cartncodform/restock/config; requests: POST .../subscribe.
+   The admin preview (BackInStockPreview.jsx) mirrors this look. */
 (function () {
   'use strict';
 
@@ -14,8 +15,11 @@
   var BELL = SVG + '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
   var CHAT = SVG + '<path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.5 8.5 0 1 1 21 11.5z"/></svg>';
   var MAIL = SVG + '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
-  var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>';
+  var CHEV = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+  var CHECK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>';
   var EMAIL_RE = /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}\.[A-Za-z]{2,24}$/;
+  var RING_R = 22;
+  var RING_C = 2 * Math.PI * RING_R;
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -44,56 +48,77 @@
     s.id = 'ccf-bis-styles';
     s.textContent = [
       '.ccf-bis,.ccf-bis *{box-sizing:border-box}',
-      '.ccf-bis{margin:16px 0;padding:16px;border:1px solid #E7E5E4;border-radius:16px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.04),0 6px 20px rgba(16,24,40,.05);font-family:inherit;color:#1A1A1A;line-height:1.45}',
-      '.ccf-bis[hidden]{display:none}',
+      '.ccf-bis{margin:10px 0 14px;font-family:inherit;color:#1A1A1A;line-height:1.45}',
+      '.ccf-bis[hidden],.ccf-bis [hidden]{display:none!important}',
       '.ccf-bis button,.ccf-bis input{font-family:inherit;letter-spacing:normal;text-transform:none;margin:0;min-height:0}',
-      // head
-      '.ccf-bis-head{display:flex;gap:12px;align-items:center}',
-      '.ccf-bis-icon{width:42px;height:42px;border-radius:12px;background:' + accent + '12;color:' + accent + ';display:flex;align-items:center;justify-content:center;flex-shrink:0}',
-      '.ccf-bis-icon svg{animation:ccf-bis-ring 2.4s ease-in-out 1s 2;transform-origin:50% 10%}',
+      // the Notify me button (in place of Buy it now)
+      '.ccf-bis-trigger{width:100%;display:flex;align-items:center;gap:10px;min-height:48px;padding:12px 16px;border:1px solid ' + accent + ';border-radius:' + r + ';background:' + accent + ';color:#fff;font-size:15px;font-weight:600;cursor:pointer;text-align:left;transition:box-shadow .2s,transform .15s}',
+      '.ccf-bis-trigger:hover{box-shadow:0 8px 22px ' + accent + '40}',
+      '.ccf-bis-trigger:active{transform:translateY(1px)}',
+      '.ccf-bis-trigger:focus-visible{outline:2px solid ' + accent + ';outline-offset:3px}',
+      '.ccf-bis-trigger .ccf-bis-tlabel{flex:1;min-width:0}',
+      '.ccf-bis-tpct{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.18)}',
+      '.ccf-bis-chev{display:flex;width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.16);align-items:center;justify-content:center;transition:transform .25s}',
+      '.ccf-bis.is-open .ccf-bis-chev{transform:rotate(90deg)}',
+      '.ccf-bis-trigger svg:first-child{animation:ccf-bis-ring 2.4s ease-in-out 1s 2;transform-origin:50% 10%}',
       '@keyframes ccf-bis-ring{0%,30%,100%{transform:rotate(0)}5%{transform:rotate(14deg)}10%{transform:rotate(-12deg)}15%{transform:rotate(8deg)}20%{transform:rotate(-6deg)}}',
-      '.ccf-bis-copy{display:flex;flex-direction:column;gap:2px;min-width:0}',
-      '.ccf-bis-title{font-size:15.5px;font-weight:650;line-height:1.3}',
-      '.ccf-bis-text{font-size:13px;color:#6B6B6B}',
-      // priority bar
-      '.ccf-bis-meter{margin-top:14px}',
-      '.ccf-bis-meterrow{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;font-weight:600;color:#3F3F46}',
-      '.ccf-bis-pct{font-size:14px;font-weight:750;color:#15803D;font-variant-numeric:tabular-nums}',
-      '.ccf-bis-bar{position:relative;height:8px;margin-top:6px;border-radius:999px;background:#F1F1EF;overflow:hidden}',
-      '.ccf-bis-fill{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#4ADE80,#16A34A);transition:width .7s cubic-bezier(.2,.8,.2,1)}',
-      '.ccf-bis.is-full .ccf-bis-fill{background:linear-gradient(90deg,#22C55E,#15803D);box-shadow:0 0 10px rgba(34,197,94,.45)}',
-      // option cards
-      '.ccf-bis-body{margin-top:12px;display:flex;flex-direction:column;gap:10px}',
-      '.ccf-bis-card{border:1px solid #EAEAEA;border-radius:12px;background:#FCFCFB;padding:12px;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s}',
-      '.ccf-bis-card:focus-within{border-color:#D4D4D8;box-shadow:0 4px 14px rgba(16,24,40,.06);background:#fff}',
-      '.ccf-bis-cardhead{display:flex;align-items:center;gap:8px}',
-      '.ccf-bis-chan{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}',
+      '.ccf-bis.is-full .ccf-bis-trigger{background:#fff;color:#15803D;border-color:#86EFAC}',
+      '.ccf-bis.is-full .ccf-bis-chev,.ccf-bis.is-full .ccf-bis-tpct{background:#F0FDF4}',
+      // the small panel
+      '.ccf-bis-panel{margin-top:10px;padding:14px;border:1px solid #E7E5E4;border-radius:16px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.04),0 12px 32px rgba(16,24,40,.10);animation:ccf-bis-pop .28s cubic-bezier(.2,.8,.2,1)}',
+      '@keyframes ccf-bis-pop{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}',
+      '.ccf-bis-top{display:flex;align-items:center;gap:12px}',
+      '.ccf-bis-thumb{width:52px;height:52px;border-radius:10px;object-fit:cover;background:#F1F1EF;flex-shrink:0;border:1px solid #EEE}',
+      '.ccf-bis-topcopy{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}',
+      '.ccf-bis-sold{font-size:12.5px;font-weight:600;color:#B42318}',
+      '.ccf-bis-chance{font-size:15px;font-weight:650;line-height:1.3}',
+      '.ccf-bis-text{font-size:12.5px;color:#71717A}',
+      '.ccf-bis-ringwrap{position:relative;width:56px;height:56px;flex-shrink:0}',
+      '.ccf-bis-ringwrap svg{transform:rotate(-90deg)}',
+      '.ccf-bis-ringtrack{stroke:#F1F1EF}',
+      '.ccf-bis-ringfill{stroke:#16A34A;transition:stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1)}',
+      '.ccf-bis-pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13.5px;font-weight:750;color:#15803D;font-variant-numeric:tabular-nums}',
+      // options with round selectors
+      '.ccf-bis-opts{margin-top:14px;border-top:1px solid #F0F0F0}',
+      '.ccf-bis-opt{border-bottom:1px solid #F0F0F0;padding:2px 0}',
+      '.ccf-bis-row{width:100%;display:flex;align-items:center;gap:10px;padding:11px 2px;background:none;border:none;cursor:pointer;color:#1A1A1A;text-align:left}',
+      '.ccf-bis-row:focus-visible{outline:2px solid ' + accent + ';outline-offset:2px;border-radius:8px}',
+      '.ccf-bis-chan{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}',
       '.ccf-bis-chan svg{width:16px;height:16px}',
       '.ccf-bis-wa .ccf-bis-chan{background:#E7F8EE;color:#15803D}',
       '.ccf-bis-em .ccf-bis-chan{background:' + accent + '12;color:' + accent + '}',
-      '.ccf-bis-cardtitle{font-size:13.5px;font-weight:600}',
+      '.ccf-bis-name{font-size:14px;font-weight:600}',
       '.ccf-bis-badge{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:#DCFCE7;color:#166534}',
-      '.ccf-bis-chip{margin-left:auto;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;border:1px solid #BBF7D0;background:#F0FDF4;color:#15803D;font-variant-numeric:tabular-nums}',
-      '.ccf-bis-em .ccf-bis-chip{border-color:#E2E8F0;background:#F8FAFC;color:#475569}',
-      '.ccf-bis-form{display:flex;gap:8px}',
-      '.ccf-bis-input{flex:1;min-width:0;height:42px;padding:0 12px;border:1px solid #D4D4D8;border-radius:' + r + ';background:#fff;font-size:14px;color:#1A1A1A}',
-      '.ccf-bis-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;padding:0 16px;height:42px;border:1px solid ' + accent + ';border-radius:' + r + ';background:' + accent + ';color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .15s}',
-      '.ccf-bis-btn:hover{opacity:.92}',
-      '.ccf-bis-btn:active{transform:translateY(1px)}',
-      '.ccf-bis-wa .ccf-bis-btn{background:#1FA855;border-color:#1FA855}',
-      '.ccf-bis-btn:focus-visible,.ccf-bis-input:focus-visible,.ccf-bis-pushlink:focus-visible{outline:2px solid ' + accent + ';outline-offset:2px}',
-      '.ccf-bis-btn[disabled]{opacity:.6;cursor:default}',
+      '.ccf-bis-chip{margin-left:auto;font-size:12px;font-weight:700;color:#15803D;font-variant-numeric:tabular-nums}',
+      '.ccf-bis-em .ccf-bis-chip{color:#475569}',
+      '.ccf-bis-radio{width:22px;height:22px;border-radius:50%;border:2px solid #D4D4D8;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}',
+      '.ccf-bis-radio::after{content:"";width:10px;height:10px;border-radius:50%;background:transparent;transition:background .15s,transform .15s;transform:scale(.4)}',
+      '.ccf-bis-opt.is-on .ccf-bis-radio{border-color:' + accent + '}',
+      '.ccf-bis-opt.is-on .ccf-bis-radio::after{background:' + accent + ';transform:scale(1)}',
+      '.ccf-bis-wa.is-on .ccf-bis-radio{border-color:#16A34A}',
+      '.ccf-bis-wa.is-on .ccf-bis-radio::after{background:#16A34A}',
+      '.ccf-bis-opt.is-done .ccf-bis-row{cursor:default}',
+      '.ccf-bis-opt.is-done .ccf-bis-radio{border-color:#16A34A;background:#16A34A;color:#fff}',
+      '.ccf-bis-opt.is-done .ccf-bis-radio::after{display:none}',
+      '.ccf-bis-added{font-size:12px;font-weight:600;color:#15803D}',
+      '.ccf-bis-field{padding:0 2px 12px;display:flex;flex-direction:column;gap:5px;animation:ccf-bis-pop .2s ease-out}',
+      '.ccf-bis-inputwrap{display:flex;align-items:stretch;border:1px solid #D4D4D8;border-radius:' + r + ';background:#fff;overflow:hidden}',
+      '.ccf-bis-inputwrap:focus-within{border-color:' + accent + ';box-shadow:0 0 0 3px ' + accent + '1F}',
+      '.ccf-bis-cc{display:flex;align-items:center;padding:0 10px;font-size:14px;font-weight:600;color:#3F3F46;background:#FAFAFA;border-right:1px solid #E4E4E7}',
+      '.ccf-bis-input{flex:1;min-width:0;height:44px;padding:0 12px;border:none;background:transparent;font-size:14px;color:#1A1A1A;outline:none}',
       '.ccf-bis-hint{margin:0;font-size:12px;color:#71717A}',
-      '.ccf-bis-push{width:100%}',
-      '.ccf-bis-pushlink{align-self:center;display:inline-flex;align-items:center;gap:6px;background:none;border:none;padding:4px 6px;color:' + accent + ';font-size:13px;font-weight:600;cursor:pointer}',
+      // submit + extras
+      '.ccf-bis-submit{width:100%;margin-top:14px;height:48px;border:none;border-radius:999px;background:' + accent + ';color:#fff;font-size:15px;font-weight:650;cursor:pointer;transition:opacity .15s,box-shadow .2s}',
+      '.ccf-bis-submit:hover{box-shadow:0 8px 22px ' + accent + '40}',
+      '.ccf-bis-submit[disabled]{opacity:.45;cursor:default;box-shadow:none}',
+      '.ccf-bis-submit:focus-visible{outline:2px solid ' + accent + ';outline-offset:3px}',
+      '.ccf-bis-pushlink{display:flex;margin:10px auto 0;align-items:center;gap:6px;background:none;border:none;padding:4px 6px;color:' + accent + ';font-size:13px;font-weight:600;cursor:pointer}',
       '.ccf-bis-pushlink svg{width:15px;height:15px}',
-      '.ccf-bis-err{margin:0;font-size:12.5px;color:#B42318}',
-      // done / partial
-      '.ccf-bis-done{display:flex;gap:10px;align-items:center;margin-top:12px;padding:11px 12px;border-radius:12px;background:#ECFDF5;border:1px solid #BBF7D0;color:#065F46;font-size:13.5px;font-weight:500}',
+      '.ccf-bis-err{margin:10px 0 0;font-size:12.5px;color:#B42318}',
+      '.ccf-bis-done{display:flex;gap:10px;align-items:center;margin-top:12px;padding:11px 12px;border-radius:12px;background:#ECFDF5;border:1px solid #BBF7D0;color:#065F46;font-size:13.5px;font-weight:500;animation:ccf-bis-pop .3s ease-out}',
       '.ccf-bis-done svg{flex-shrink:0}',
-      '.ccf-bis-partial{margin-top:12px}',
-      '@media (prefers-reduced-motion:reduce){.ccf-bis-icon svg{animation:none}.ccf-bis-fill{transition:none}}',
-      '@media (max-width:420px){.ccf-bis{padding:14px}.ccf-bis-form{flex-direction:column}.ccf-bis-btn{width:100%}}',
+      '@media (prefers-reduced-motion:reduce){.ccf-bis *{animation:none!important;transition:none!important}}',
+      '@media (max-width:420px){.ccf-bis-panel{padding:12px}.ccf-bis-thumb{width:44px;height:44px}}',
     ].join('');
     document.head.appendChild(s);
   }
@@ -125,7 +150,10 @@
       var ch = settings.channels || {};
       var accent = /^#[0-9a-fA-F]{6}$/.test(settings.accentColor || '') ? settings.accentColor : '#111827';
       var waPct = settings.percent && isFinite(settings.percent.whatsapp) ? Math.max(0, Math.min(100, settings.percent.whatsapp)) : 80;
-      var PCT = { whatsapp: waPct, email: 100 - waPct };
+      // What each channel adds to the ring. With just one of WhatsApp/email on, that one is 100%.
+      var PCT = ch.whatsapp && ch.email ? { whatsapp: waPct, email: 100 - waPct }
+        : ch.whatsapp ? { whatsapp: 100 } : ch.email ? { email: 100 } : { push: 100 };
+      var replaceBuyNow = settings.replaceBuyNow !== false;
       injectStyles(accent, radius(settings.buttonRadius));
       placeAfterBuyButtons(root, design);
 
@@ -137,7 +165,9 @@
 
       var shown = null;
       var busy = false;
-      var lastPct = {}; // variant id → % last drawn (the bar animates from there)
+      var open = false;
+      var picked = {}; // channels ticked in the panel (not yet sent)
+      var lastPct = {}; // variant id → % the ring last showed (it animates from there)
 
       function currentVariant() {
         var id = '';
@@ -179,15 +209,23 @@
         return !!(ch.push && window.CCFPush && typeof window.CCFPush.subscribe === 'function' &&
           window.CCFPush.canPush && window.CCFPush.canPush());
       }
-      var meterOn = !!(ch.whatsapp && ch.email);
-
       function percentOf(got) {
-        return (got.whatsapp ? PCT.whatsapp : 0) + (got.email ? PCT.email : 0);
+        if (got.done) return 100;
+        var p = 0;
+        Object.keys(PCT).forEach(function (k) { if (got[k]) p += PCT[k]; });
+        return Math.min(100, p);
       }
-      function isComplete(got) {
-        if (got.done) return true;
-        if (meterOn) return !!(got.whatsapp && got.email);
-        return !!(got.whatsapp || got.email || got.push);
+
+      // Sold-out size: hide the theme's "Buy it now" so the Notify me button takes its place.
+      function setBuyNowHidden(hide) {
+        if (!replaceBuyNow || design) return;
+        var form = buyForm();
+        var scope = (form && (form.closest('product-form') || form.parentNode)) || document;
+        var nodes = scope.querySelectorAll('.shopify-payment-button, shopify-buy-it-now-button, [data-shopify="payment-button"]');
+        for (var i = 0; i < nodes.length; i++) {
+          if (hide) { nodes[i].setAttribute('data-ccf-hidden', '1'); nodes[i].style.display = 'none'; }
+          else if (nodes[i].getAttribute('data-ccf-hidden')) { nodes[i].style.display = ''; nodes[i].removeAttribute('data-ccf-hidden'); }
+        }
       }
 
       function sessionId() {
@@ -228,160 +266,213 @@
         return d;
       }
 
-      function meter(variantId, pct) {
-        var m = el('div', 'ccf-bis-meter');
-        m.setAttribute('role', 'progressbar');
-        m.setAttribute('aria-valuemin', '0');
-        m.setAttribute('aria-valuemax', '100');
-        m.setAttribute('aria-valuenow', String(pct));
-        m.setAttribute('aria-label', t.meterLabel || 'Alert priority');
-        var row = el('div', 'ccf-bis-meterrow');
-        row.appendChild(el('span', null, t.meterLabel || 'Alert priority'));
-        row.appendChild(el('span', 'ccf-bis-pct', pct + '%'));
-        var bar = el('div', 'ccf-bis-bar');
-        var fill = el('span', 'ccf-bis-fill');
-        var from = lastPct[variantId] != null ? lastPct[variantId] : 0;
-        fill.style.width = from + '%';
-        bar.appendChild(fill);
-        m.appendChild(row);
-        m.appendChild(bar);
-        lastPct[variantId] = pct;
-        if (from !== pct) setTimeout(function () { fill.style.width = pct + '%'; }, 40);
-        else fill.style.width = pct + '%';
-        return m;
+      function ring(id, pct) {
+        var w = el('div', 'ccf-bis-ringwrap');
+        w.setAttribute('role', 'progressbar');
+        w.setAttribute('aria-valuemin', '0');
+        w.setAttribute('aria-valuemax', '100');
+        w.setAttribute('aria-valuenow', String(pct));
+        w.setAttribute('aria-label', t.chanceLabel || 'Your chance to be notified');
+        var from = lastPct[id] != null ? lastPct[id] : 0;
+        var off = function (p) { return (RING_C * (1 - p / 100)).toFixed(1); };
+        w.innerHTML = '<svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">' +
+          '<circle class="ccf-bis-ringtrack" cx="28" cy="28" r="' + RING_R + '" fill="none" stroke-width="5"/>' +
+          '<circle class="ccf-bis-ringfill" cx="28" cy="28" r="' + RING_R + '" fill="none" stroke-width="5" stroke-linecap="round" ' +
+          'stroke-dasharray="' + RING_C.toFixed(1) + '" stroke-dashoffset="' + off(from) + '"/></svg>';
+        w.appendChild(el('span', 'ccf-bis-pct', pct + '%'));
+        var fill = w.querySelector('.ccf-bis-ringfill');
+        lastPct[id] = pct;
+        if (from !== pct) setTimeout(function () { fill.setAttribute('stroke-dashoffset', off(pct)); }, 40);
+        return w;
       }
 
       function draw(variant) {
         var id = String(variant.id);
         var got = gotFor(id);
         var pct = percentOf(got);
-        var complete = isComplete(got);
+        var complete = pct >= 100;
         var size = sizeLabel(variant.title);
         box.innerHTML = '';
-        box.classList.toggle('is-full', meterOn && complete);
+        box.classList.toggle('is-open', open);
+        box.classList.toggle('is-full', complete);
 
-        var head = el('div', 'ccf-bis-head');
-        var icon = el('span', 'ccf-bis-icon');
-        icon.innerHTML = BELL;
-        var copy = el('span', 'ccf-bis-copy');
-        copy.appendChild(el('span', 'ccf-bis-title', t.boxTitle || 'Sold out in this size'));
-        copy.appendChild(el('span', 'ccf-bis-text', t.boxText || 'Get a message the moment it’s back.'));
-        head.appendChild(icon);
-        head.appendChild(copy);
-        box.appendChild(head);
-        if (meterOn) box.appendChild(meter(id, complete && got.done ? 100 : pct));
+        // 1. The Notify me button (arrow opens the panel).
+        var trig = el('button', 'ccf-bis-trigger');
+        trig.type = 'button';
+        trig.setAttribute('aria-expanded', open ? 'true' : 'false');
+        trig.innerHTML = complete ? CHECK : BELL;
+        trig.appendChild(el('span', 'ccf-bis-tlabel', complete ? 'You’re on the list' : (t.triggerText || 'Notify me when it’s back')));
+        if (pct > 0) trig.appendChild(el('span', 'ccf-bis-tpct', pct + '%'));
+        var chev = el('span', 'ccf-bis-chev');
+        chev.innerHTML = CHEV;
+        trig.appendChild(chev);
+        trig.addEventListener('click', function () { open = !open; draw(variant); });
+        box.appendChild(trig);
+        if (!open) return;
+
+        // 2. The panel.
+        var panel = el('div', 'ccf-bis-panel');
+        var top = el('div', 'ccf-bis-top');
+        var img = root.getAttribute('data-product-image') || '';
+        if (img) {
+          var th = el('img', 'ccf-bis-thumb');
+          th.src = img.indexOf('//') === 0 ? 'https:' + img : img;
+          th.alt = '';
+          top.appendChild(th);
+        }
+        var copy = el('div', 'ccf-bis-topcopy');
+        copy.appendChild(el('span', 'ccf-bis-sold', (t.boxTitle || 'Sorry, {size} is sold out').replace(/\{size\}/g, size)));
+        copy.appendChild(el('span', 'ccf-bis-chance', t.chanceLabel || 'Your chance to be notified'));
+        top.appendChild(copy);
+        top.appendChild(ring(id, pct));
+        panel.appendChild(top);
 
         if (complete) {
-          box.appendChild(doneLine('', (t.successText || 'Done! We’ll tell you when {size} is back.').replace(/\{size\}/g, size)));
+          panel.appendChild(doneLine('', (t.successText || 'Done! We’ll tell you when {size} is back.').replace(/\{size\}/g, size)));
+          box.appendChild(panel);
           return;
         }
-        if (meterOn && pct > 0) {
+        if (pct > 0) {
           var next = got.whatsapp ? 'email' : 'WhatsApp';
-          box.appendChild(doneLine('ccf-bis-partial', (t.partialText || 'Done! Add {next} too to reach 100%.')
+          panel.appendChild(doneLine('ccf-bis-partial', (t.partialText || 'Done! Add {next} too to reach 100%.')
             .replace(/\{next\}/g, next).replace(/\{percent\}/g, String(pct)).replace(/\{size\}/g, size)));
         }
+        if (t.boxText && pct === 0) panel.appendChild(el('p', 'ccf-bis-text', t.boxText));
 
-        var body = el('div', 'ccf-bis-body');
         var err = el('p', 'ccf-bis-err');
         err.setAttribute('role', 'alert');
         err.hidden = true;
-        var label = t.buttonText || 'Notify me';
-        var showWa = ch.whatsapp && !got.whatsapp;
-        var showEmail = ch.email && !got.email;
-        var showPush = pushPossible() && !got.push;
+        var opts = el('div', 'ccf-bis-opts');
+        opts.setAttribute('role', 'group');
+        opts.setAttribute('aria-label', 'How should we tell you?');
+        var inputs = {};
+        var submit = el('button', 'ccf-bis-submit', t.buttonText || 'Notify me');
+        submit.type = 'button';
 
-        function fail(msg, btn) {
+        function syncSubmit() {
+          var any = Object.keys(picked).some(function (k) { return picked[k] && !got[k]; });
+          submit.disabled = !any;
+        }
+
+        function option(kind, channel, name, iconSvg, badge, inputEl, hint, prefix) {
+          var done = !!got[channel];
+          var on = !done && !!picked[channel];
+          var o = el('div', 'ccf-bis-opt ccf-bis-' + kind + (on ? ' is-on' : '') + (done ? ' is-done' : ''));
+          var row = el('button', 'ccf-bis-row');
+          row.type = 'button';
+          row.setAttribute('role', 'checkbox');
+          row.setAttribute('aria-checked', done || on ? 'true' : 'false');
+          if (done) row.setAttribute('aria-disabled', 'true');
+          var chan = el('span', 'ccf-bis-chan');
+          chan.innerHTML = iconSvg;
+          row.appendChild(chan);
+          row.appendChild(el('span', 'ccf-bis-name', name));
+          if (badge && !done) row.appendChild(el('span', 'ccf-bis-badge', badge));
+          if (done) row.appendChild(el('span', 'ccf-bis-chip ccf-bis-added', 'Added'));
+          else if (PCT[channel] != null && PCT[channel] < 100) row.appendChild(el('span', 'ccf-bis-chip', '+' + PCT[channel] + '%'));
+          else row.appendChild(el('span', 'ccf-bis-chip', ''));
+          var dot = el('span', 'ccf-bis-radio');
+          if (done) dot.innerHTML = CHECK;
+          row.appendChild(dot);
+          if (!done) {
+            row.addEventListener('click', function () {
+              picked[channel] = !picked[channel];
+              err.hidden = true;
+              draw(variant);
+              var f = box.querySelector('.ccf-bis-' + kind + ' .ccf-bis-input');
+              if (picked[channel] && f) f.focus();
+            });
+          }
+          o.appendChild(row);
+          if (on) {
+            var field = el('div', 'ccf-bis-field');
+            var wrap = el('div', 'ccf-bis-inputwrap');
+            if (prefix) wrap.appendChild(el('span', 'ccf-bis-cc', prefix));
+            wrap.appendChild(inputEl);
+            field.appendChild(wrap);
+            if (hint) field.appendChild(el('p', 'ccf-bis-hint', hint));
+            o.appendChild(field);
+            inputs[channel] = inputEl;
+          }
+          return o;
+        }
+
+        if (ch.email) {
+          var em = el('input', 'ccf-bis-input ccf-bis-email');
+          em.type = 'email';
+          em.autocomplete = 'email';
+          em.placeholder = t.emailPlaceholder || 'Your email';
+          em.setAttribute('aria-label', t.emailPlaceholder || 'Your email');
+          var known = readJSON('ccf_known_email');
+          if (known && known.email) em.value = known.email;
+          if (draft.email != null) em.value = draft.email;
+          em.addEventListener('input', function () { draft.email = em.value; });
+          opts.appendChild(option('em', 'email', 'Email', MAIL, '', em, ch.whatsapp ? (t.emailHint || '') : '', ''));
+        }
+        if (ch.whatsapp) {
+          var ph = el('input', 'ccf-bis-input ccf-bis-phone');
+          ph.type = 'tel';
+          ph.autocomplete = 'tel-national';
+          ph.inputMode = 'tel';
+          ph.placeholder = t.whatsappPlaceholder || 'WhatsApp number';
+          ph.setAttribute('aria-label', t.whatsappPlaceholder || 'WhatsApp number');
+          if (draft.phone != null) ph.value = draft.phone;
+          ph.addEventListener('input', function () { draft.phone = ph.value; });
+          opts.appendChild(option('wa', 'whatsapp', 'WhatsApp', CHAT, 'Fastest', ph,
+            t.whatsappHint || 'Fastest · we message you the moment it’s back', '+91'));
+        }
+        if (opts.children.length) panel.appendChild(opts);
+
+        function fail(msg) {
           busy = false;
-          if (btn) btn.disabled = false;
+          syncSubmit();
           err.textContent = msg;
           err.hidden = false;
         }
-        function saved(channel) {
-          busy = false;
-          markGot(id, channel);
-          draw(variant);
-        }
 
-        function card(kind, title, iconSvg, badge, chipPct, input, hint, onSubmit) {
-          var c = el('div', 'ccf-bis-card ccf-bis-' + kind);
-          var h = el('div', 'ccf-bis-cardhead');
-          var chan = el('span', 'ccf-bis-chan');
-          chan.innerHTML = iconSvg;
-          h.appendChild(chan);
-          h.appendChild(el('span', 'ccf-bis-cardtitle', title));
-          if (badge) h.appendChild(el('span', 'ccf-bis-badge', badge));
-          if (meterOn) h.appendChild(el('span', 'ccf-bis-chip', '+' + chipPct + '%'));
-          c.appendChild(h);
-          var form = el('form', 'ccf-bis-form');
-          form.setAttribute('novalidate', '');
-          var btn = el('button', 'ccf-bis-btn', label);
-          btn.type = 'submit';
-          form.appendChild(input);
-          form.appendChild(btn);
-          form.addEventListener('submit', function (ev) {
-            ev.preventDefault();
-            if (busy) return;
-            onSubmit(btn);
+        submit.addEventListener('click', function () {
+          if (busy) return;
+          var jobs = [];
+          if (picked.email && !got.email && inputs.email) {
+            var e = String(inputs.email.value || '').trim();
+            if (!EMAIL_RE.test(e)) { fail('Enter a valid email'); inputs.email.focus(); return; }
+            jobs.push(['email', { channel: 'email', email: e }]);
+          }
+          if (picked.whatsapp && !got.whatsapp && inputs.whatsapp) {
+            var raw = String(inputs.whatsapp.value || '').replace(/[\s()-]/g, '');
+            var num = raw.indexOf('+') === 0 ? raw : raw.replace(/^0+/, '');
+            if (!/^\+?\d{10,15}$/.test(num)) { fail('Enter a valid WhatsApp number'); inputs.whatsapp.focus(); return; }
+            jobs.push(['whatsapp', { channel: 'whatsapp', phone: num.indexOf('+') === 0 ? num : (num.length === 10 ? '+91' + num : '+' + num) }]);
+          }
+          if (!jobs.length) return;
+          busy = true;
+          submit.disabled = true;
+          err.hidden = true;
+          var errors = [];
+          Promise.all(jobs.map(function (j) {
+            return send(variant, j[1]).then(function () {
+              markGot(id, j[0]);
+              picked[j[0]] = false;
+              if (j[0] === 'email') writeJSON('ccf_known_email', { email: j[1].email, ts: Date.now() });
+            }).catch(function (x) { errors.push((x && x.message) || 'Could not save. Try again.'); });
+          })).then(function () {
+            busy = false;
+            draw(variant);
+            if (errors.length) {
+              var e2 = box.querySelector('.ccf-bis-err');
+              if (e2) { e2.textContent = errors[0]; e2.hidden = false; }
+            }
           });
-          c.appendChild(form);
-          if (hint) c.appendChild(el('p', 'ccf-bis-hint', hint));
-          return c;
-        }
+        });
+        if (ch.email || ch.whatsapp) panel.appendChild(submit);
 
-        // WhatsApp — fastest: the store messages the shopper as soon as the size is back.
-        if (showWa) {
-          var phone = el('input', 'ccf-bis-input ccf-bis-phone');
-          phone.type = 'tel';
-          phone.autocomplete = 'tel';
-          phone.inputMode = 'tel';
-          phone.placeholder = t.whatsappPlaceholder || 'WhatsApp number';
-          phone.setAttribute('aria-label', t.whatsappPlaceholder || 'WhatsApp number');
-          body.appendChild(card('wa', 'WhatsApp', CHAT, 'Fastest', PCT.whatsapp, phone,
-            t.whatsappHint || 'Fastest · we message you the moment it’s back',
-            function (btn) {
-              var num = String(phone.value || '').replace(/[\s()-]/g, '');
-              if (!/^\+?\d{10,15}$/.test(num)) { fail('Enter a valid WhatsApp number', null); phone.focus(); return; }
-              busy = true;
-              btn.disabled = true;
-              err.hidden = true;
-              send(variant, { channel: 'whatsapp', phone: num })
-                .then(function () { saved('whatsapp'); })
-                .catch(function (e) { fail((e && e.message) || 'Could not save. Try again.', btn); });
-            }));
-        }
-
-        // Email — sent a little later, after WhatsApp and push.
-        if (showEmail) {
-          var input = el('input', 'ccf-bis-input ccf-bis-email');
-          input.type = 'email';
-          input.autocomplete = 'email';
-          input.placeholder = t.emailPlaceholder || 'Your email';
-          input.setAttribute('aria-label', t.emailPlaceholder || 'Your email');
-          try { var known = readJSON('ccf_known_email'); if (known && known.email) input.value = known.email; } catch (e) {}
-          body.appendChild(card('em', 'Email', MAIL, '', PCT.email, input,
-            ch.whatsapp ? (t.emailHint || '') : '',
-            function (btn) {
-              var email = String(input.value || '').trim();
-              if (!EMAIL_RE.test(email)) { fail('Enter a valid email', null); input.focus(); return; }
-              busy = true;
-              btn.disabled = true;
-              err.hidden = true;
-              send(variant, { channel: 'email', email: email })
-                .then(function () {
-                  writeJSON('ccf_known_email', { email: email, ts: Date.now() });
-                  saved('email');
-                })
-                .catch(function (e) { fail((e && e.message) || 'Could not save. Try again.', btn); });
-            }));
-        }
-
-        // Push — one tap. A small extra next to the cards; the only option when nothing else is on.
-        if (showPush) {
-          var alone = !showWa && !showEmail;
-          var pushBtn = el('button', alone ? 'ccf-bis-btn ccf-bis-push' : 'ccf-bis-pushlink ccf-bis-push');
+        // Push: a small extra (or the only way, when it is the only channel on).
+        if (pushPossible() && !got.push) {
+          var alone = !ch.email && !ch.whatsapp;
+          var pushBtn = el('button', alone ? 'ccf-bis-submit ccf-bis-push' : 'ccf-bis-pushlink ccf-bis-push');
           pushBtn.type = 'button';
-          pushBtn.innerHTML = BELL;
-          pushBtn.appendChild(document.createTextNode(' ' + (alone ? label : 'Also get a browser alert')));
+          if (!alone) pushBtn.innerHTML = BELL;
+          pushBtn.appendChild(document.createTextNode(alone ? (t.buttonText || 'Notify me') : ' Also get a browser alert'));
           pushBtn.addEventListener('click', function () {
             if (busy) return;
             busy = true;
@@ -389,30 +480,36 @@
             err.hidden = true;
             window.CCFPush.subscribe()
               .then(function (token) { return send(variant, { channel: 'push', pushToken: token }); })
-              .then(function () { saved('push'); })
-              .catch(function (e) {
-                var denied = e && /denied|unsupported/.test(e.message || '');
+              .then(function () { busy = false; markGot(id, 'push'); draw(variant); })
+              .catch(function (x) {
+                pushBtn.disabled = false;
+                var denied = x && /denied|unsupported/.test(x.message || '');
                 fail(denied
                   ? (ch.whatsapp ? 'Notifications are blocked. Use WhatsApp or email instead.' : ch.email ? 'Notifications are blocked. Use your email instead.' : 'Notifications are blocked in this browser.')
-                  : (e && e.message) || 'Could not save. Try again.', pushBtn);
+                  : (x && x.message) || 'Could not save. Try again.');
               });
           });
-          body.appendChild(pushBtn);
+          panel.appendChild(pushBtn);
         }
-        if (!body.children.length) return;
-        body.appendChild(err);
-        box.appendChild(body);
+        panel.appendChild(err);
+        box.appendChild(panel);
+        syncSubmit();
       }
+      var draft = {}; // typed values survive redraws (picking a second option, errors)
 
       function refresh() {
         if (busy) return;
         var v = currentVariant();
         // Theme editor: always show the box so the merchant can see and place it.
         if (design && v && v.available) v = { id: v.id, title: v.title, available: false };
-        var key = v && !v.available ? String(v.id) + ':' + Object.keys(gotFor(v.id)).sort().join(',') : null;
+        var soldOut = !!(v && !v.available);
+        var key = soldOut ? String(v.id) + ':' + Object.keys(gotFor(v.id)).sort().join(',') : null;
         if (key === shown) return;
+        var sameSize = shown && key && shown.split(':')[0] === key.split(':')[0];
         shown = key;
+        setBuyNowHidden(soldOut);
         if (!key) { box.hidden = true; return; }
+        if (!sameSize) { open = false; picked = {}; }
         draw(v);
         box.hidden = false;
       }
