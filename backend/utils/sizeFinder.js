@@ -77,6 +77,12 @@ function sanitizeChart(raw, gender) {
 
 /** Text on the product-page card, when the store has not changed it. */
 const CARD_DEFAULTS = { cardTitle: 'Not sure about your size?', cardText: '3 quick questions · takes 20 seconds' };
+const BUTTON_STYLES = ['filled', 'outline', 'soft'];
+const MAX_RADIUS = 24; // 24 = fully round (pill)
+function cleanRadius(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && v !== '' && v !== null && v !== undefined ? Math.min(MAX_RADIUS, Math.max(0, n)) : MAX_RADIUS;
+}
 
 /** Full settings from the admin. Throws validation errors (→ 400). */
 function sanitizeSettings(raw) {
@@ -88,6 +94,8 @@ function sanitizeSettings(raw) {
     buttonText: String(r.buttonText || '').trim().slice(0, 40) || 'Find my size',
     cardTitle: String(r.cardTitle || '').trim().slice(0, 60) || CARD_DEFAULTS.cardTitle,
     cardText: String(r.cardText || '').trim().slice(0, 80) || CARD_DEFAULTS.cardText,
+    buttonStyle: BUTTON_STYLES.includes(r.buttonStyle) ? r.buttonStyle : 'filled',
+    buttonRadius: cleanRadius(r.buttonRadius),
     accentColor: COLOR_RE.test(String(r.accentColor || '')) ? String(r.accentColor) : '#111827',
     unit: r.unit === 'in' ? 'in' : 'cm',
     charts: {
@@ -111,6 +119,8 @@ function withDefaults(doc) {
     buttonText: String(d.buttonText || 'Find my size'),
     cardTitle: String(d.cardTitle || CARD_DEFAULTS.cardTitle),
     cardText: String(d.cardText || CARD_DEFAULTS.cardText),
+    buttonStyle: BUTTON_STYLES.includes(d.buttonStyle) ? d.buttonStyle : 'filled',
+    buttonRadius: cleanRadius(d.buttonRadius),
     accentColor: COLOR_RE.test(String(d.accentColor || '')) ? d.accentColor : '#111827',
     unit: d.unit === 'in' ? 'in' : 'cm',
     charts: {
@@ -133,6 +143,8 @@ function publicSettings(doc) {
     buttonText: s.buttonText,
     cardTitle: s.cardTitle,
     cardText: s.cardText,
+    buttonStyle: s.buttonStyle,
+    buttonRadius: s.buttonRadius,
     accentColor: s.accentColor,
     unit: s.unit,
     genders: GENDERS.filter((g) => s.charts[g].length > 0),
@@ -201,7 +213,7 @@ function recommendSize(chart, body, fit) {
 }
 
 module.exports = {
-  GENDERS, SHAPES, FITS, DEFAULT_CHARTS, CARD_DEFAULTS,
+  GENDERS, SHAPES, FITS, DEFAULT_CHARTS, CARD_DEFAULTS, BUTTON_STYLES, MAX_RADIUS,
   sanitizeChart, sanitizeSettings, withDefaults, publicSettings,
   sanitizeAnswers, estimateBody, recommendSize,
 };

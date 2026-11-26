@@ -215,6 +215,38 @@ export default function SizeFinderScreen({ shop }) {
             />
           </span>
         </label>
+        <div style={ui.field}>
+          <span>Button style</span>
+          <span style={{ display: 'flex', gap: 4, marginTop: 6 }} role="group" aria-label="Button style">
+            {[['filled', 'Filled'], ['outline', 'Outline'], ['soft', 'Soft']].map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={(settings.buttonStyle || 'filled') === v}
+                onClick={() => set({ buttonStyle: v })}
+                style={(settings.buttonStyle || 'filled') === v ? ui.segOn : ui.segOff}
+              >
+                {l}
+              </button>
+            ))}
+          </span>
+        </div>
+        <label style={ui.field}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Button corners</span>
+            <span style={ui.muted}>{radiusLabel(settings.buttonRadius)}</span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={24}
+            step={1}
+            value={radiusValue(settings.buttonRadius)}
+            onChange={(e) => set({ buttonRadius: Number(e.target.value) })}
+            style={{ width: '100%', maxWidth: 360, accentColor: '#303030', marginTop: 6 }}
+            aria-label="Button corner radius"
+          />
+        </label>
       </section>
 
       <section style={ui.card} aria-label="Size charts">
@@ -316,6 +348,16 @@ const LAYOUT_CSS = `
 .sf-fit{transform-origin:top left}
 @media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static;height:auto!important}.sf-fit{transform:none!important;width:100%!important}}
 `;
+
+/** Corner slider: 0 = square … 24 = fully round (the default). */
+export function radiusValue(v) {
+  const n = Number(v);
+  return v === undefined || v === null || v === '' || !Number.isFinite(n) ? 24 : Math.min(24, Math.max(0, Math.round(n)));
+}
+export function radiusLabel(v) {
+  const n = radiusValue(v);
+  return n === 0 ? 'Square' : n >= 24 ? 'Round' : `${n} px`;
+}
 
 const ui = {
   page: { fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif", WebkitFontSmoothing: 'antialiased', color: '#303030', maxWidth: 1280, margin: '0 auto', padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 },

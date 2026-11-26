@@ -177,6 +177,31 @@ describe('card on the product page', () => {
     fireEvent.change(screen.getByLabelText('Card heading'), { target: { value: '' } });
     expect(screen.getByTestId('preview-frame').querySelector('.sfp-card-title')).toHaveTextContent('Not sure about your size?');
   });
+
+  it('button style and corners: shown in the preview and saved', async () => {
+    await renderScreen();
+    const cta = () => screen.getByTestId('preview-frame').querySelector('.sfp-cta');
+    expect(cta().style.borderRadius).toBe('999px');
+    expect(screen.getByText('Round')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Outline' }));
+    fireEvent.change(screen.getByLabelText('Button corner radius'), { target: { value: '8' } });
+    expect(cta().className).toMatch(/is-outline/);
+    expect(cta().style.borderRadius).toBe('8px');
+    expect(screen.getByText('8 px')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Soft' }));
+    expect(cta().className).toMatch(/is-soft/);
+    const s = await saved();
+    expect(s.buttonStyle).toBe('soft');
+    expect(s.buttonRadius).toBe(8);
+  });
+
+  it('corner helpers', () => {
+    const { radiusLabel, radiusValue } = require('../app/admin/screens/SizeFinder');
+    expect(radiusLabel(0)).toBe('Square');
+    expect(radiusLabel(undefined)).toBe('Round');
+    expect(radiusLabel(30)).toBe('Round');
+    expect(radiusValue('x')).toBe(24);
+  });
 });
 
 describe('preview design', () => {

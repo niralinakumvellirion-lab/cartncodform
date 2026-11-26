@@ -117,6 +117,17 @@ describe('sanitizeSettings / sanitizeChart', () => {
     expect(S.publicSettings({}).cardTitle).toBe('Not sure about your size?');
   });
 
+  test('button style and corner radius: allowed values only, 0–24, defaults filled + round', () => {
+    const d = S.sanitizeSettings(ok);
+    expect(d.buttonStyle).toBe('filled');
+    expect(d.buttonRadius).toBe(24);
+    expect(S.sanitizeSettings({ ...ok, buttonStyle: 'outline', buttonRadius: 8 })).toMatchObject({ buttonStyle: 'outline', buttonRadius: 8 });
+    expect(S.sanitizeSettings({ ...ok, buttonStyle: 'neon', buttonRadius: 99 })).toMatchObject({ buttonStyle: 'filled', buttonRadius: 24 });
+    expect(S.sanitizeSettings({ ...ok, buttonRadius: -5 }).buttonRadius).toBe(0);
+    expect(S.sanitizeSettings({ ...ok, buttonRadius: 'abc' }).buttonRadius).toBe(24);
+    expect(S.publicSettings({ buttonStyle: 'soft', buttonRadius: 0 })).toMatchObject({ buttonStyle: 'soft', buttonRadius: 0 });
+  });
+
   test('chest must go up row by row', () => {
     expect(() => S.sanitizeChart([{ size: 'S', chest: 90, waist: 70 }, { size: 'M', chest: 90, waist: 74 }], 'women'))
       .toThrow(/chest must be bigger/);

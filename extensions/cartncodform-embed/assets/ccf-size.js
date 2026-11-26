@@ -50,7 +50,9 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       '.ccf-sf-cta{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;background:' + accent + ';color:#fff;border:1px solid ' + accent + ';border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}',
       '.ccf-sf-trigger.is-done .ccf-sf-icon{background:' + accent + ';color:#fff}',
       '.ccf-sf-trigger.is-done .ccf-sf-icon::after{display:none}',
-      '.ccf-sf-trigger.is-done .ccf-sf-cta{background:#fff;color:' + accent + '}',
+      '.ccf-sf-cta.is-outline{background:#fff;color:' + accent + '}',
+      '.ccf-sf-cta.is-soft{background:' + accent + '1F;border-color:transparent;color:' + accent + '}',
+      '.ccf-sf-trigger.is-done .ccf-sf-cta{background:#fff;border-color:' + accent + ';color:' + accent + '}',
       '@media (max-width:420px){.ccf-sf-trigger{padding:11px 12px;gap:10px}.ccf-sf-icon{width:38px;height:38px}.ccf-sf-card-title{font-size:14px}.ccf-sf-cta{padding:7px 11px;font-size:12px}}',
       // panel
       '.ccf-sf-panel{margin-top:12px;border:1px solid #E5E7EB;border-radius:16px;background:#fff;box-shadow:0 10px 30px rgba(17,24,39,.08);overflow:hidden}',
@@ -180,6 +182,14 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
     return chest.status === 'snug' ? 18 : chest.status === 'roomy' ? 82 : 50;
   }
 
+  // Button look set in the admin: style (filled / outline / soft) and corner radius (24 = round).
+  var CTA_STYLES = { outline: ' is-outline', soft: ' is-soft' };
+  function ctaRadius(v) {
+    var n = Number(v);
+    if (v === undefined || v === null || v === '' || !isFinite(n) || n >= 24) return '999px';
+    return Math.max(0, Math.round(n)) + 'px';
+  }
+
   // ── Placement ──────────────────────────────────────────────────────────────
   // Shoppers miss the button when the theme puts the block under the description, so we move it
   // to just below the theme's variant picker (outside it: themes redraw the picker on each change).
@@ -267,7 +277,9 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       copy.appendChild(el('span', 'ccf-sf-card-sub', size ? 'Based on your answers · tap to change' : (settings.cardText || '3 quick questions · takes 20 seconds')));
       open.appendChild(icon);
       open.appendChild(copy);
-      open.appendChild(el('span', 'ccf-sf-cta', size ? 'Change' : (settings.buttonText || 'Find my size') + ' →'));
+      var cta = el('span', 'ccf-sf-cta' + (CTA_STYLES[settings.buttonStyle] || ''), size ? 'Change' : (settings.buttonText || 'Find my size') + ' →');
+      cta.style.borderRadius = ctaRadius(settings.buttonRadius);
+      open.appendChild(cta);
     }
     var known = saved.size && (!sizeValues.length || sizeValues.some(function (v) { return v.toLowerCase() === String(saved.size).toLowerCase(); }));
     setOpenLabel(known ? saved.size : '');

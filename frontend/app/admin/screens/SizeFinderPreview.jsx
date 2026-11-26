@@ -20,6 +20,13 @@ export function weightLabel(kg, unit) {
   return unit === 'lb' ? `${Math.round(kg / KG_PER_LB)} lb` : `${Math.round(kg)} kg`;
 }
 // Fit-meter position (0–100) from the chest result — same as ccf-size.js.
+/** Corner radius of the card button: 24 or more = fully round. Same rule as ccf-size.js. */
+export function ctaRadius(v) {
+  const n = Number(v);
+  if (v === undefined || v === null || v === '' || !Number.isFinite(n) || n >= 24) return '999px';
+  return `${Math.max(0, Math.round(n))}px`;
+}
+
 export function meterPosition(reasons) {
   const chest = (reasons || []).find((x) => x.area === 'chest');
   if (!chest) return 50;
@@ -141,7 +148,12 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
                   <span className="sfp-card-title">{settings.cardTitle || 'Not sure about your size?'}</span>
                   <span className="sfp-card-sub">{settings.cardText || '3 quick questions · takes 20 seconds'}</span>
                 </span>
-                <span className="sfp-cta">{settings.buttonText || 'Find my size'} →</span>
+                <span
+                  className={`sfp-cta${settings.buttonStyle === 'outline' ? ' is-outline' : settings.buttonStyle === 'soft' ? ' is-soft' : ''}`}
+                  style={{ borderRadius: ctaRadius(settings.buttonRadius) }}
+                >
+                  {settings.buttonText || 'Find my size'} →
+                </span>
               </div>
 
               <div className="sfp-panel">
@@ -275,11 +287,13 @@ const CSS = `
 .sfp-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .sfp-card-title{font-size:15px;font-weight:600;line-height:1.3}
 .sfp-card-sub{font-size:12.5px;color:#616161}
-.sfp-cta{flex-shrink:0;background:var(--sfp-accent);color:#fff;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}
+.sfp-cta{flex-shrink:0;background:var(--sfp-accent);color:#fff;border:1px solid var(--sfp-accent);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}
 .sfp-frame.is-mobile .sfp-card{padding:11px 12px;gap:10px}
 .sfp-frame.is-mobile .sfp-icon{width:38px;height:38px}
 .sfp-frame.is-mobile .sfp-card-title{font-size:14px}
 .sfp-frame.is-mobile .sfp-cta{padding:7px 11px;font-size:12px}
+.sfp-cta.is-outline{background:#fff;color:var(--sfp-accent)}
+.sfp-cta.is-soft{background:color-mix(in srgb,var(--sfp-accent) 12%,#fff);border-color:transparent;color:var(--sfp-accent)}
 .sfp-warn{font-size:13px;color:#B45309;background:#FFFBEB;border-radius:8px;padding:8px 10px;margin:0}
 .sfp-panel{margin-top:10px;border:1px solid #E5E7EB;border-radius:16px;background:#fff;box-shadow:0 10px 30px rgba(17,24,39,.08);overflow:hidden}
 .sfp-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 0}

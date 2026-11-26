@@ -215,6 +215,18 @@ describe('ccf-size.js — card that shoppers notice', () => {
     expect(q('.ccf-sf-cta').textContent).toBe('Check size →');
   });
 
+  test('button style and corners come from the admin', async () => {
+    await load();
+    expect(q('.ccf-sf-cta').className).toBe('ccf-sf-cta');
+    expect(q('.ccf-sf-cta').style.borderRadius).toBe('999px');
+    await load({ settings: { ...SETTINGS, buttonStyle: 'outline', buttonRadius: 6 } });
+    expect(q('.ccf-sf-cta').classList.contains('is-outline')).toBe(true);
+    expect(q('.ccf-sf-cta').style.borderRadius).toBe('6px');
+    await load({ settings: { ...SETTINGS, buttonStyle: 'soft', buttonRadius: 0 } });
+    expect(q('.ccf-sf-cta').classList.contains('is-soft')).toBe(true);
+    expect(q('.ccf-sf-cta').style.borderRadius).toBe('0px');
+  });
+
   test('moves right under the Size picker, even when the theme put the block lower down', async () => {
     await load({ pageHtml: `
       <div class="shopify-section">
