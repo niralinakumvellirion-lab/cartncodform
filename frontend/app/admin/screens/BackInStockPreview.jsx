@@ -13,17 +13,34 @@ export const RESTOCK_TEXT_DEFAULTS = {
   pushBody: 'Good news! {size} is available again. Tap to grab it before it sells out.',
   emailSubject: '{product} is back in stock',
   emailBody: 'Good news! {product} ({size}) is available again. Grab it before it sells out.',
+  whatsappPlaceholder: 'WhatsApp number',
+  whatsappHint: 'Fastest · we message you the moment it’s back',
+  emailHint: 'We email you within {time} of the restock',
+  whatsappMessage: 'Hi! Good news — {product} ({size}) is back in stock. Get it here before it sells out: {link}',
 };
 export const RESTOCK_TEXT_MAX = {
   boxTitle: 60, boxText: 90, buttonText: 30, emailPlaceholder: 40, successText: 90,
   pushTitle: 65, pushBody: 160, emailSubject: 90, emailBody: 400,
+  whatsappPlaceholder: 40, whatsappHint: 80, emailHint: 80, whatsappMessage: 300,
 };
+// Mirrors backend EMAIL_DELAYS / delayLabel.
+export const EMAIL_DELAYS = [[0, 'Right away'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours'], [720, '12 hours']];
+export function delayLabel(minutes) {
+  const m = EMAIL_DELAYS.some(([v]) => v === Number(minutes)) ? Number(minutes) : 60;
+  if (m === 0) return 'a few minutes';
+  if (m < 60) return `${m} minutes`;
+  return m === 60 ? '1 hour' : `${m / 60} hours`;
+}
 export const SAMPLE = { product: 'Cotton Kurta', size: 'M', price: '₹1,299' };
 
 /** Saved text (or the default when empty) with {product} / {size} filled from the sample. */
-export function restockText(texts, key, sample = SAMPLE) {
+export function restockText(texts, key, sample = SAMPLE, extra = {}) {
   const raw = texts && texts[key] != null && String(texts[key]).trim() ? texts[key] : RESTOCK_TEXT_DEFAULTS[key];
-  return String(raw).replace(/\{product\}/g, sample.product).replace(/\{size\}/g, sample.size);
+  return String(raw)
+    .replace(/\{product\}/g, sample.product)
+    .replace(/\{size\}/g, sample.size)
+    .replace(/\{time\}/g, extra.time || '1 hour')
+    .replace(/\{link\}/g, extra.link || 'your-store.com/products/cotton-kurta');
 }
 export function restockRadius(v) {
   const n = Number(v);
@@ -54,9 +71,10 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
   const [device, setDevice] = useState('desktop');
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const radius = restockRadius(settings.buttonRadius);
-  const t = (k) => restockText(settings.texts, k);
+  const t = (k) => restockText(settings.texts, k, SAMPLE, { time: delayLabel(settings.emailDelayMinutes) });
   const hl = (...keys) => (highlight && keys.includes(highlight.key) ? ' is-hl' : '');
-  const ch = settings.channels || { push: true, email: true };
+  const ch = settings.channels || { push: true, email: true, whatsapp: false };
+  const many = [ch.whatsapp, ch.push, ch.email].filter(Boolean).length > 1;
 
   const box = (
     <div className={`bp-box${hl('accentColor')}`}>
@@ -71,14 +89,30 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
         <div className={`bp-done${hl('successText')}`}><span aria-hidden="true">✓</span>{t('successText')}</div>
       ) : (
         <div className="bp-body">
-          {ch.push && (
-            <span className={`bp-btn${hl('buttonText', 'buttonRadius', 'channelPush')}`} style={{ borderRadius: radius }}><Bell /> {t('buttonText')}</span>
+          {ch.whatsapp && (
+            <div className={`bp-opt${hl('channelWhatsapp')}`}>
+              {many && <span className="bp-optlabel">WhatsApp <span className="bp-badge">Fastest</span></span>}
+              <div className="bp-form">
+                <span className={`bp-input${hl('whatsappPlaceholder')}`} style={{ borderRadius: radius }}>{t('whatsappPlaceholder')}</span>
+                <span className={`bp-btn bp-wabtn${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
+              </div>
+              <span className={`bp-hint${hl('whatsappHint')}`}>{t('whatsappHint')}</span>
+            </div>
           )}
-          {ch.push && ch.email && <span className="bp-or">or by email</span>}
+          {ch.push && ch.whatsapp && <span className="bp-or">or</span>}
+          {ch.push && (
+            <span className={`bp-btn${ch.whatsapp ? ' bp-ghost' : ''}${hl('buttonText', 'buttonRadius', 'channelPush')}`} style={{ borderRadius: radius }}>
+              <Bell /> {ch.whatsapp ? 'Get a browser alert' : t('buttonText')}
+            </span>
+          )}
+          {ch.email && (ch.push || ch.whatsapp) && <span className="bp-or">or by email</span>}
           {ch.email && (
-            <div className={`bp-form${ch.push ? '' : ' is-only'}${hl('channelEmail')}`}>
-              <span className={`bp-input${hl('emailPlaceholder')}`} style={{ borderRadius: radius }}>{t('emailPlaceholder')}</span>
-              <span className={`bp-btn bp-btn2${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
+            <div className={`bp-opt${hl('channelEmail')}`}>
+              <div className={`bp-form${ch.push || ch.whatsapp ? '' : ' is-only'}`}>
+                <span className={`bp-input${hl('emailPlaceholder')}`} style={{ borderRadius: radius }}>{t('emailPlaceholder')}</span>
+                <span className={`bp-btn bp-btn2${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
+              </div>
+              {ch.whatsapp && <span className={`bp-hint${hl('emailHint', 'emailDelayMinutes')}`}>{t('emailHint')}</span>}
             </div>
           )}
         </div>
@@ -146,6 +180,14 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
                       <span className={`bp-nbody${hl('pushBody')}`}>{t('pushBody')}</span>
                     </span>
                     <span className="bp-nimg" />
+                  </div>
+                </div>
+              )}
+              {ch.whatsapp && (
+                <div className="bp-wa">
+                  <p className="bp-sub">WhatsApp · you send it</p>
+                  <div className="bp-chat">
+                    <span className={`bp-bubble${hl('whatsappMessage')}`}>{t('whatsappMessage')}<small>now ✓✓</small></span>
                   </div>
                 </div>
               )}
@@ -218,6 +260,16 @@ const CSS = `
 .bp-input{flex:1;min-width:0;padding:9px 10px;border:1px solid #D4D4D4;background:#fff;font-size:12.5px;color:#9A9A9A}
 .bp-btn2{flex-shrink:0;background:#fff;color:var(--bp-accent)}
 .bp-form.is-only .bp-btn2{background:var(--bp-accent);color:#fff}
+.bp-opt{display:flex;flex-direction:column;gap:5px}
+.bp-optlabel{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600}
+.bp-badge{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:#DCFCE7;color:#166534}
+.bp-hint{font-size:11px;color:#6B6B6B}
+.bp-wabtn{flex-shrink:0;background:#1FA855;border-color:#1FA855;color:#fff}
+.bp-ghost{background:#fff;color:var(--bp-accent)}
+.bp-wa{margin-bottom:12px}
+.bp-chat{background:#EFE7DD;border-radius:10px;padding:12px;display:flex;justify-content:flex-end}
+.bp-bubble{max-width:88%;background:#D9FDD3;border-radius:9px 2px 9px 9px;padding:8px 10px;font-size:12px;line-height:1.45;color:#111B21;box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.bp-bubble small{display:block;text-align:right;font-size:10px;color:#667781;margin-top:2px}
 .bp-done{display:flex;gap:8px;align-items:center;margin-top:10px;padding:9px 10px;border-radius:9px;background:#ECFDF5;color:#065F46;font-size:12.5px;font-weight:500}
 .bp-sub{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#303030;margin:0 0 6px!important}
 .bp-push{margin-bottom:12px}

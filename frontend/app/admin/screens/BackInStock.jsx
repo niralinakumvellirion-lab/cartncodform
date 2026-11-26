@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import ThemeBlockSetup from '../components/ThemeBlockSetup';
-import BackInStockPreview, { RESTOCK_TEXT_DEFAULTS, RESTOCK_TEXT_MAX } from './BackInStockPreview';
+import BackInStockPreview, { RESTOCK_TEXT_DEFAULTS, RESTOCK_TEXT_MAX, EMAIL_DELAYS } from './BackInStockPreview';
 import { fitScale } from './SizeFinder';
 
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
@@ -40,6 +40,7 @@ export default function BackInStockScreen({ shop }) {
   const [boxView, setBoxView] = useState('form');
   const [openSize, setOpenSize] = useState(null); // variantId whose people list is open
   const [people, setPeople] = useState({}); // variantId → { list } | { loading } | { error }
+  const [waList, setWaList] = useState(null); // WhatsApp alerts ready for the seller to send
   const router = useRouter();
   const fitRef = useRef(null);
   const layoutRef = useRef(null);
@@ -77,6 +78,9 @@ export default function BackInStockScreen({ shop }) {
     apiGet(`/api/restock/${shop}/overview`)
       .then((d) => setOverview(d))
       .catch(() => setOverview({ failed: true }));
+    apiGet(`/api/restock/${shop}/whatsapp`)
+      .then((d) => setWaList(d.toSend || []))
+      .catch(() => setWaList([]));
   }, [shop]);
 
   if (loadError) return <p style={ui.error} role="alert">{loadError}</p>;
@@ -92,7 +96,7 @@ export default function BackInStockScreen({ shop }) {
   function setText(k, v) { set({ texts: { ...texts, [k]: v } }); }
   function setChannel(k, v) {
     const next = { ...channels, [k]: v };
-    if (!next.push && !next.email) return; // keep at least one
+    if (!next.push && !next.email && !next.whatsapp) return; // keep at least one
     set({ channels: next });
   }
 
@@ -118,6 +122,11 @@ export default function BackInStockScreen({ shop }) {
     apiGet(`/api/restock/${shop}/waiting?variantId=${encodeURIComponent(variantId)}`)
       .then((d) => setPeople((p) => ({ ...p, [variantId]: { list: d.people || [] } })))
       .catch(() => setPeople((p) => ({ ...p, [variantId]: { error: true } })));
+  }
+  // The link opens WhatsApp in a new tab (an <a>, so it is never blocked); then we mark it sent.
+  function markWaSent(id) {
+    setWaList((l) => (l || []).filter((x) => x.id !== id));
+    apiSend(`/api/restock/${shop}/whatsapp/${id}/sent`, 'POST', {}).catch(() => {});
   }
   function openCustomer(profileId) {
     router.push(`/admin/customers/${encodeURIComponent(profileId)}?shop=${encodeURIComponent(shop)}`);
@@ -157,7 +166,7 @@ export default function BackInStockScreen({ shop }) {
   function channelSwitch(k, title, text) {
     const on = channels[k];
     return (
-      <div key={k} style={ui.toggleRow} data-hl={k === 'push' ? 'channelPush' : 'channelEmail'} data-hl-label={title}>
+      <div key={k} style={ui.toggleRow} data-hl={{ push: 'channelPush', email: 'channelEmail', whatsapp: 'channelWhatsapp' }[k]} data-hl-label={title}>
         <span>
           <span style={ui.sectionTitle}>{title}</span>
           <span style={{ ...ui.sectionText, fontSize: 12.5 }}>{text}</span>
@@ -187,7 +196,7 @@ export default function BackInStockScreen({ shop }) {
           <div style={ui.head}>
             <div>
               <h1 style={ui.h1}>Back in stock</h1>
-              <p style={{ ...ui.muted, margin: '0 0 10px' }}>When a size is sold out, shoppers tap “Notify me”. We send them a push or email the moment it’s back.</p>
+              <p style={{ ...ui.muted, margin: '0 0 10px' }}>When a size is sold out, shoppers tap “Notify me”. When it’s back, WhatsApp shoppers hear first, then push, then email.</p>
               <span style={{ ...ui.pill, ...(enabled ? ui.pillOn : ui.pillOff) }}>
                 <span style={{ ...ui.dot, background: enabled ? '#047857' : '#B45309' }} />
                 {enabled ? 'Showing on sold-out sizes' : 'Hidden — turn on and save to show it'}
@@ -207,6 +216,28 @@ export default function BackInStockScreen({ shop }) {
               </button>
             </span>
           </div>
+
+          {waList && waList.length > 0 && (
+            <section style={{ ...ui.card, borderColor: '#86EFAC', background: '#F0FDF4' }} aria-label="Send on WhatsApp">
+              <SectionHead icon="chat" title={`Send on WhatsApp · ${waList.length} waiting`} text="These sizes are back. Tap Send: WhatsApp opens with the message ready — just press send there." />
+              <ul style={ui.people} aria-label="WhatsApp alerts to send">
+                {waList.map((w) => (
+                  <li key={w.id} style={ui.person}>
+                    <span style={{ ...ui.personIcon, background: '#DCFCE7', color: '#166534' }} aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{ICONS.chat}</svg>
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={ui.personMain}>{w.phone}</span>
+                      <span style={ui.hint}>{w.productTitle}{w.variantTitle ? ` · ${w.variantTitle}` : ''} is back</span>
+                    </span>
+                    <a href={w.waLink} target="_blank" rel="noopener noreferrer" style={ui.waBtn} onClick={() => markWaSent(w.id)}>
+                      Send on WhatsApp
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section style={ui.card} aria-label="Results">
             <SectionHead icon="chart" title="Results" text="Last 30 days." />
@@ -246,7 +277,7 @@ export default function BackInStockScreen({ shop }) {
                       </td>
                       <td style={ui.td}>{w.variantTitle || '—'}</td>
                       <td style={{ ...ui.td, textAlign: 'right', fontWeight: 600 }}>{w.count}</td>
-                      <td style={{ ...ui.td, color: '#616161' }}>{[w.push ? `${w.push} push` : '', w.email ? `${w.email} email` : ''].filter(Boolean).join(' · ')}</td>
+                      <td style={{ ...ui.td, color: '#616161' }}>{[w.whatsapp ? `${w.whatsapp} WhatsApp` : '', w.push ? `${w.push} push` : '', w.email ? `${w.email} email` : ''].filter(Boolean).join(' · ')}</td>
                       <td style={{ ...ui.td, color: '#616161' }}>{waitingSince(w.since)}</td>
                       <td style={{ ...ui.td, textAlign: 'right' }}>
                         <button
@@ -287,9 +318,22 @@ export default function BackInStockScreen({ shop }) {
               <SectionHead icon="bell" title="“Notify me” box" text="Shows under Add to cart when the chosen size is sold out." />
               <p style={ui.group}>How shoppers get the alert</p>
               <div style={ui.toggles}>
-                {channelSwitch('push', 'Push notification', 'One tap, no typing. Needs the “ShopiReachBoost AI Push” app embed on.')}
-                {channelSwitch('email', 'Email', 'Shoppers type their email.')}
+                {channelSwitch('whatsapp', 'WhatsApp · fastest', 'Shoppers leave their number. When the size is back we remind you at once, and you send it from this page in one tap.')}
+                {channelSwitch('push', 'Push notification', 'Sent at once. One tap, no typing. Needs the “ShopiReachBoost AI Push” app embed on.')}
+                {channelSwitch('email', 'Email', 'Sent later, after WhatsApp and push get the first chance.')}
               </div>
+              {channels.email && (
+                <label style={{ ...ui.field, marginTop: 12 }} data-hl="emailDelayMinutes" data-hl-label="Email wait">Send email alerts
+                  <select
+                    value={settings.emailDelayMinutes ?? 60}
+                    onChange={(e) => set({ emailDelayMinutes: Number(e.target.value) })}
+                    style={{ ...ui.input, maxWidth: 260 }}
+                    aria-label="Send email alerts after"
+                  >
+                    {EMAIL_DELAYS.map(([v, l]) => <option key={v} value={v}>{v === 0 ? 'Right away' : `${l} after the restock`}</option>)}
+                  </select>
+                </label>
+              )}
               <p style={{ ...ui.group, marginTop: 16 }}>Words</p>
               <div className="bis-grid2">
                 {textField('Heading', 'boxTitle')}
@@ -297,6 +341,13 @@ export default function BackInStockScreen({ shop }) {
                 {textField('Button text', 'buttonText')}
                 {textField('Email box hint', 'emailPlaceholder')}
               </div>
+              {channels.whatsapp && (
+                <div className="bis-grid2">
+                  {textField('WhatsApp box hint', 'whatsappPlaceholder')}
+                  {textField('WhatsApp note', 'whatsappHint')}
+                  {channels.email && textField('Email note', 'emailHint', { hint: '{time} becomes your email wait, e.g. 1 hour' })}
+                </div>
+              )}
               {textField('After sign-up', 'successText', { hint: '{size} becomes the size, e.g. M' })}
 
               <p style={ui.group}>Look</p>
@@ -359,13 +410,17 @@ export default function BackInStockScreen({ shop }) {
                 {textField('Push title', 'pushTitle')}
                 {textField('Push text', 'pushBody', { multiline: true })}
               </>)}
+              {channels.whatsapp && (<>
+                <p style={ui.group}>WhatsApp (you send it)</p>
+                {textField('WhatsApp message', 'whatsappMessage', { multiline: true, hint: '{link} becomes the product link' })}
+              </>)}
               {channels.email && (<>
                 <p style={ui.group}>Email</p>
                 {textField('Email subject', 'emailSubject')}
                 {textField('Email text', 'emailBody', { multiline: true })}
               </>)}
               <p style={ui.tip}>
-                Alerts go out in small groups (25 every 5 minutes) so a small restock doesn’t sell out to the first few. Quiet hours and your plan’s monthly message limit apply.
+                WhatsApp shoppers come first (you get a reminder at once), then push, then email after your wait. Automatic alerts go out in small groups (25 every 5 minutes); quiet hours and your plan’s monthly message limit apply.
               </p>
             </section>
 
@@ -414,13 +469,13 @@ export function WaitingPeople({ data, onOpen }) {
         <li key={p.id} style={ui.person}>
           <span style={ui.personIcon} aria-hidden="true">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              {p.channel === 'push' ? ICONS.bell : <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>}
+              {p.channel === 'push' ? ICONS.bell : p.channel === 'whatsapp' ? ICONS.chat : <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>}
             </svg>
           </span>
           <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={ui.personMain}>{p.email || 'Push subscriber (no email yet)'}</span>
+            <span style={ui.personMain}>{p.channel === 'whatsapp' ? p.phone : (p.email || 'Push subscriber (no email yet)')}</span>
             <span style={ui.hint}>
-              {p.channel === 'push' ? 'Push' : 'Email'}
+              {p.channel === 'push' ? 'Push' : p.channel === 'whatsapp' ? (p.ready ? 'WhatsApp · ready to send' : 'WhatsApp') : 'Email'}
               {p.customerId ? ' · Logged-in customer' : ''}
               {' · '}{new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
             </span>
@@ -447,6 +502,7 @@ function Stat({ label, value, sub }) {
 const ICONS = {
   bell: <><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
   send: <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />,
+  chat: <path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.5 8.5 0 1 1 21 11.5z" />,
   chart: <path d="M3 3v18h18M7 15l4-4 3 3 5-6" />,
 };
 function SectionHead({ icon, title, text }) {
@@ -495,6 +551,7 @@ const ui = {
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { textAlign: 'left', padding: '8px 6px', fontSize: 11, color: '#616161', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid #E3E3E3' },
   td: { padding: '8px 6px', fontSize: 13, borderBottom: '1px solid #F1F1F1' },
+  waBtn: { background: '#1FA855', color: '#fff', borderRadius: 8, padding: '7px 12px', fontSize: 13, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' },
   linkBtn: { background: 'none', border: 'none', padding: 0, color: '#2C6ECB', fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' },
   people: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },

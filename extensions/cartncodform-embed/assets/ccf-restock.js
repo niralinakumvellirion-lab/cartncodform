@@ -61,6 +61,13 @@
       '.ccf-bis-form .ccf-bis-btn{width:auto;flex-shrink:0;background:#fff;color:' + accent + '}',
       '.ccf-bis-form.is-only .ccf-bis-btn{background:' + accent + ';color:#fff}',
       '.ccf-bis-err{margin:0;font-size:12.5px;color:#B42318}',
+      '.ccf-bis-opt{display:flex;flex-direction:column;gap:6px}',
+      '.ccf-bis-optlabel{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:#1A1A1A}',
+      '.ccf-bis-badge{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:#DCFCE7;color:#166534}',
+      '.ccf-bis-badge.is-slow{background:#F1F5F9;color:#475569}',
+      '.ccf-bis-hint{margin:0;font-size:12px;color:#6B6B6B}',
+      '.ccf-bis-wa .ccf-bis-form .ccf-bis-btn{background:#1FA855;border-color:#1FA855;color:#fff}',
+      '.ccf-bis-btn.is-ghost{background:#fff;color:' + accent + '}',
       '.ccf-bis-done{display:flex;gap:10px;align-items:center;margin-top:12px;padding:10px 12px;border-radius:10px;background:#ECFDF5;color:#065F46;font-size:13.5px;font-weight:500}',
       '.ccf-bis-done svg{flex-shrink:0}',
       '@media (max-width:420px){.ccf-bis-form{flex-direction:column}.ccf-bis-form .ccf-bis-btn{width:100%}}',
@@ -189,8 +196,10 @@
         err.setAttribute('role', 'alert');
         err.hidden = true;
         var label = t.buttonText || 'Notify me';
+        var useWa = !!(settings.channels && settings.channels.whatsapp);
         var usePush = pushPossible();
         var useEmail = !!(settings.channels && settings.channels.email);
+        var many = (useWa ? 1 : 0) + (usePush ? 1 : 0) + (useEmail ? 1 : 0) > 1;
 
         function fail(msg, btn) {
           busy = false;
@@ -203,12 +212,52 @@
           markSubscribed(variant.id);
           draw(variant);
         }
+        function optLabel(text, badge, slow) {
+          var row = el('span', 'ccf-bis-optlabel', text);
+          if (badge) row.appendChild(el('span', 'ccf-bis-badge' + (slow ? ' is-slow' : ''), badge));
+          return row;
+        }
 
+        // 1. WhatsApp — fastest: the store messages the shopper as soon as the size is back.
+        if (useWa) {
+          var wa = el('div', 'ccf-bis-opt ccf-bis-wa');
+          if (many) wa.appendChild(optLabel('WhatsApp', 'Fastest', false));
+          var waForm = el('form', 'ccf-bis-form');
+          waForm.setAttribute('novalidate', '');
+          var phone = el('input', 'ccf-bis-input ccf-bis-phone');
+          phone.type = 'tel';
+          phone.autocomplete = 'tel';
+          phone.inputMode = 'tel';
+          phone.placeholder = t.whatsappPlaceholder || 'WhatsApp number';
+          phone.setAttribute('aria-label', t.whatsappPlaceholder || 'WhatsApp number');
+          var waBtn = el('button', 'ccf-bis-btn ccf-bis-wabtn', label);
+          waBtn.type = 'submit';
+          waForm.appendChild(phone);
+          waForm.appendChild(waBtn);
+          waForm.addEventListener('submit', function (ev) {
+            ev.preventDefault();
+            if (busy) return;
+            var num = String(phone.value || '').replace(/[\s()-]/g, '');
+            if (!/^\+?\d{10,15}$/.test(num)) { fail('Enter a valid WhatsApp number', null); phone.focus(); return; }
+            busy = true;
+            waBtn.disabled = true;
+            err.hidden = true;
+            send(variant, { channel: 'whatsapp', phone: num })
+              .then(ok)
+              .catch(function (e) { fail((e && e.message) || 'Could not save. Try again.', waBtn); });
+          });
+          wa.appendChild(waForm);
+          wa.appendChild(el('p', 'ccf-bis-hint', t.whatsappHint || 'Fastest · we message you the moment it’s back'));
+          body.appendChild(wa);
+        }
+
+        // 2. Push — one tap, instant browser alert.
         if (usePush) {
-          var pushBtn = el('button', 'ccf-bis-btn ccf-bis-push');
+          if (useWa) body.appendChild(el('div', 'ccf-bis-or', 'or'));
+          var pushBtn = el('button', 'ccf-bis-btn ccf-bis-push' + (useWa ? ' is-ghost' : ''));
           pushBtn.type = 'button';
           pushBtn.innerHTML = BELL;
-          pushBtn.appendChild(document.createTextNode(' ' + label));
+          pushBtn.appendChild(document.createTextNode(' ' + (useWa ? 'Get a browser alert' : label)));
           pushBtn.addEventListener('click', function () {
             if (busy) return;
             busy = true;
@@ -220,15 +269,18 @@
               .catch(function (e) {
                 var denied = e && /denied|unsupported/.test(e.message || '');
                 fail(denied
-                  ? (useEmail ? 'Notifications are blocked. Use your email instead.' : 'Notifications are blocked in this browser.')
+                  ? (useWa ? 'Notifications are blocked. Use WhatsApp or email instead.' : useEmail ? 'Notifications are blocked. Use your email instead.' : 'Notifications are blocked in this browser.')
                   : (e && e.message) || 'Could not save. Try again.', pushBtn);
               });
           });
           body.appendChild(pushBtn);
         }
-        if (usePush && useEmail) body.appendChild(el('div', 'ccf-bis-or', 'or by email'));
+
+        // 3. Email — sent a little later, after WhatsApp and push.
         if (useEmail) {
-          var form = el('form', 'ccf-bis-form' + (usePush ? '' : ' is-only'));
+          if (useWa || usePush) body.appendChild(el('div', 'ccf-bis-or', 'or by email'));
+          var em = el('div', 'ccf-bis-opt ccf-bis-em');
+          var form = el('form', 'ccf-bis-form' + (useWa || usePush ? '' : ' is-only'));
           form.setAttribute('novalidate', '');
           var input = el('input', 'ccf-bis-input');
           input.type = 'email';
@@ -255,9 +307,11 @@
               })
               .catch(function (e) { fail((e && e.message) || 'Could not save. Try again.', submit); });
           });
-          body.appendChild(form);
+          em.appendChild(form);
+          if (useWa && t.emailHint) em.appendChild(el('p', 'ccf-bis-hint', t.emailHint));
+          body.appendChild(em);
         }
-        if (!usePush && !useEmail) return;
+        if (!useWa && !usePush && !useEmail) return;
         body.appendChild(err);
         box.appendChild(body);
       }

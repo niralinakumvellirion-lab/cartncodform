@@ -8,7 +8,11 @@ const RestockConfigSchema = new mongoose.Schema({
   channels: {
     push: { type: Boolean, default: true },
     email: { type: Boolean, default: true },
+    // WhatsApp: the shopper leaves a number; the seller sends the alert by hand (wa.me link).
+    whatsapp: { type: Boolean, default: false },
   },
+  // Email alerts wait this long after the restock (WhatsApp + push go first).
+  emailDelayMinutes: { type: Number, default: 60 },
   accentColor: { type: String, default: '#111827' },
   buttonRadius: { type: Number, default: 8 },
   texts: { type: mongoose.Schema.Types.Mixed, default: {} },

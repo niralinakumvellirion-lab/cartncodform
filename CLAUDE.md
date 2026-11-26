@@ -3,7 +3,7 @@
 Claude Code reads this automatically. Keep it short and current.
 
 ## What this is
-Embedded Shopify app. Retention engine for small Indian D2C stores: web push + email, per-visitor decision engine, AI-written copy, COD order form. Single store per install. No WhatsApp/SMS in this version.
+Embedded Shopify app. Retention engine for small Indian D2C stores: web push + email, per-visitor decision engine, AI-written copy, COD order form. Single store per install. No WhatsApp/SMS sending in this version — one exception: Back in stock lets shoppers leave a WhatsApp number and the seller sends the alert by hand (wa.me link, no API).
 
 Product plan: `docs/cartncodform-v2-product-plan.md`. Target UI: `docs/cartncodform-v2-prototype.jsx`. Handover for chat: `CHAT_HANDOVER_V2.md`.
 
@@ -34,7 +34,7 @@ Product plan: `docs/cartncodform-v2-product-plan.md`. Target UI: `docs/cartncodf
 - Audit files: match length to the change. A one-line fix gets a five-line audit.
 
 ## Out of scope — do not add
-Flow builder · campaigns · email editor · segments UI · multi-store · WhatsApp · SMS · ScriptTags · NextAuth
+Flow builder · campaigns · email editor · segments UI · multi-store · WhatsApp sending/API (beyond the seller-sent Back in stock link) · SMS · ScriptTags · NextAuth
 
 ## Key files
 - `backend/routes/webhooks.js` — all Shopify webhooks, HMAC verified

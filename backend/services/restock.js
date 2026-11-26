@@ -8,8 +8,11 @@
  *      back_in_stock signal is switched off, or it is quiet hours (checked again later);
  *   2. ask Shopify which waited-for variants can be bought again (ProductVariant.availableForSale —
  *      needs only read_products);
- *   3. send to the oldest waiting shoppers of those variants, at most WAVE per check (so a small
- *      restock doesn't alert everyone at once), stopping at the plan's monthly message limit.
+ *   3. WhatsApp shoppers (the seller sends those by hand): mark them "ready" and remind the seller
+ *      at once with a push to the store owner — the fastest channel;
+ *   4. send push alerts to the oldest waiting shoppers at once, and email alerts only after the
+ *      shop's email delay (counted from when the size was first seen back), at most WAVE per check
+ *      (so a small restock doesn't alert everyone at once), stopping at the plan's monthly limit.
  * Each send is logged as a ScheduledJob (signalType back_in_stock) so it shows in the dashboards,
  * counts toward the plan and carries click attribution (ccf_src / ccf_job).
  * Message words resolve here, at send time. Emails and tokens are never logged.
@@ -34,6 +37,7 @@ function defaultDeps() {
     graphQL: (...a) => require('../utils/shopifyGraphQL').shopifyGraphQL(...a),
     sendPush: (...a) => require('../utils/pushNotification').sendPushToTokens(...a),
     sendEmail: (...a) => require('../utils/email').sendMarketingEmail(...a),
+    sendOwnerPush: (...a) => require('../utils/pushNotification').sendPushToStore(...a),
     isAtLimit: (...a) => require('../utils/planUsage').isAtLimit(...a),
     isQuietNow: (...a) => require('../utils/timezone').isQuietNow(...a),
     hasActivePlan: (...a) => require('../utils/planAccess').hasActivePlan(...a),
@@ -197,7 +201,7 @@ async function processShop(shop, deps, now) {
   }
   if (deps.isQuietNow(store, now)) { summary.reason = 'quiet_hours'; return summary; }
 
-  const variantIds = (await RestockRequest.distinct('variantId', { shopDomain: shop, status: 'waiting' }))
+  const variantIds = (await RestockRequest.distinct('variantId', { shopDomain: shop, status: { $in: ['waiting', 'ready'] } }))
     .slice(0, MAX_VARIANTS);
   summary.checked = variantIds.length;
   if (!variantIds.length) return summary;
@@ -211,12 +215,60 @@ async function processShop(shop, deps, now) {
     return summary;
   }
   summary.available = available.size;
-  if (!available.size) return summary;
+  const avail = [...available];
 
-  const due = await RestockRequest.find({ shopDomain: shop, status: 'waiting', variantId: { $in: [...available] } })
+  // Sold out again: the email delay restarts on the next restock; WhatsApp waits again.
+  await RestockRequest.updateMany(
+    { shopDomain: shop, status: { $in: ['waiting', 'ready'] }, variantId: { $nin: avail }, readyAt: { $ne: null } },
+    { $set: { readyAt: null } }
+  );
+  await RestockRequest.updateMany(
+    { shopDomain: shop, status: 'ready', variantId: { $nin: avail } },
+    { $set: { status: 'waiting' } }
+  );
+  if (!available.size) return summary;
+  await RestockRequest.updateMany(
+    { shopDomain: shop, status: 'waiting', variantId: { $in: avail }, readyAt: null },
+    { $set: { readyAt: now } }
+  );
+
+  // WhatsApp: ready for the seller to send by hand; remind the seller once, right away.
+  const waRows = await RestockRequest.find(
+    { shopDomain: shop, status: 'waiting', channel: 'whatsapp', variantId: { $in: avail } },
+    '_id productTitle variantTitle'
+  ).lean();
+  if (waRows.length) {
+    await RestockRequest.updateMany(
+      { _id: { $in: waRows.map((w) => w._id) }, status: 'waiting' },
+      { $set: { status: 'ready', sellerNotifiedAt: now } }
+    );
+    summary.whatsappReady = waRows.length;
+    const first = waRows[0];
+    const what = `${first.productTitle || 'A product'}${first.variantTitle && first.variantTitle !== 'Default Title' ? ` (${first.variantTitle})` : ''}`;
+    try {
+      await deps.sendOwnerPush(
+        shop,
+        `${waRows.length} WhatsApp alert${waRows.length === 1 ? '' : 's'} to send`,
+        `${what} is back in stock. Open Back in stock in the app and tap “Send on WhatsApp”.`
+      );
+    } catch (err) {
+      console.error('[restock] seller reminder failed for', shop, '-', err.message);
+    }
+  }
+
+  // Push now; email only after the shop's email delay (WhatsApp and push get the first chance).
+  const pushDue = await RestockRequest.find({ shopDomain: shop, status: 'waiting', channel: 'push', variantId: { $in: avail } })
     .sort({ createdAt: 1 })
     .limit(WAVE)
     .lean();
+  const emailReadyBefore = new Date(now.getTime() - settings.emailDelayMinutes * 60 * 1000);
+  const emailDue = pushDue.length < WAVE
+    ? await RestockRequest.find({
+      shopDomain: shop, status: 'waiting', channel: 'email', variantId: { $in: avail },
+      readyAt: { $ne: null, $lte: emailReadyBefore },
+    }).sort({ createdAt: 1 }).limit(WAVE - pushDue.length).lean()
+    : [];
+  const due = pushDue.concat(emailDue);
 
   for (const r of due) {
     if (await deps.isAtLimit(store, 'messages')) { summary.reason = 'plan_limit'; break; }
@@ -235,12 +287,27 @@ async function processShop(shop, deps, now) {
   return summary;
 }
 
+// The first unique index (v1) had no phone, so two WhatsApp shoppers for one size would clash.
+// Drop it once per process if it exists (v2 replaces it).
+let oldIndexChecked = false;
+async function dropOldIndex() {
+  if (oldIndexChecked) return;
+  oldIndexChecked = true;
+  try {
+    const name = 'shopDomain_1_variantId_1_channel_1_pushToken_1_email_1';
+    const idx = await RestockRequest.collection.indexes();
+    if (idx.some((i) => i.name === name)) await RestockRequest.collection.dropIndex(name);
+  } catch (err) {
+    if (!/ns does not exist|not found/i.test(err.message)) console.error('[restock] index clean-up:', err.message);
+  }
+}
+
 async function processRestock(options = {}) {
   const deps = { ...defaultDeps(), ...(options.deps || {}) };
   const now = options.now || new Date();
 
   await RestockRequest.updateMany(
-    { status: 'waiting', expiresAt: { $lte: now } },
+    { status: { $in: ['waiting', 'ready'] }, expiresAt: { $lte: now } },
     { $set: { status: 'expired', error: 'timed_out' } }
   );
   // A sender that crashed mid-send leaves 'sending' rows: put them back in the queue.
@@ -249,7 +316,8 @@ async function processRestock(options = {}) {
     { $set: { status: 'waiting', claimedAt: null } }
   );
 
-  const shops = await RestockRequest.distinct('shopDomain', { status: 'waiting' });
+  await dropOldIndex();
+  const shops = await RestockRequest.distinct('shopDomain', { status: { $in: ['waiting', 'ready'] } });
   const results = [];
   for (const shop of shops) {
     try {

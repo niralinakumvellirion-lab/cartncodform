@@ -26,17 +26,21 @@ const PEOPLE = [
   { id: 'r2', variantId: '10', channel: 'push', email: null, customerId: null, profileId: null, createdAt: new Date().toISOString() },
 ];
 
+let WA_TO_SEND = [];
+
 function mockApi(settings = SETTINGS, overview = OVERVIEW) {
   apiGet.mockImplementation((url) => Promise.resolve(
     url.endsWith('/overview') ? JSON.parse(JSON.stringify(overview))
       : url.includes('/waiting') ? { people: PEOPLE }
-        : { settings: JSON.parse(JSON.stringify(settings)) }
+        : url.endsWith('/whatsapp') ? { toSend: WA_TO_SEND }
+          : { settings: JSON.parse(JSON.stringify(settings)) }
   ));
   apiSend.mockImplementation((url, method, body) => Promise.resolve({ settings: body.settings }));
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
+  WA_TO_SEND = [];
   mockApi();
 });
 
@@ -184,5 +188,54 @@ describe('preview', () => {
     expect(document.querySelector('.bp-form.is-only')).not.toBeNull();
     expect(document.querySelector('.bp-notif')).toBeNull();
     expect(document.querySelector('.bp-or')).toBeNull();
+  });
+});
+
+describe('WhatsApp (seller sends by hand) and email wait', () => {
+  test('turning WhatsApp on shows its words, message and the email wait; saves them', async () => {
+    await renderScreen();
+    expect(screen.queryByLabelText('WhatsApp message')).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Notify by whatsapp' }));
+    fireEvent.change(screen.getByLabelText('WhatsApp box hint'), { target: { value: 'Your WhatsApp' } });
+    fireEvent.change(screen.getByLabelText('WhatsApp message'), { target: { value: 'Hi, {product} is back: {link}' } });
+    fireEvent.change(screen.getByLabelText('Send email alerts after'), { target: { value: '120' } });
+    const s = await saved();
+    expect(s.channels).toEqual({ push: true, email: true, whatsapp: true });
+    expect(s.texts.whatsappPlaceholder).toBe('Your WhatsApp');
+    expect(s.texts.whatsappMessage).toBe('Hi, {product} is back: {link}');
+    expect(s.emailDelayMinutes).toBe(120);
+  });
+
+  test('preview: WhatsApp first with Fastest, email note shows the wait, WhatsApp bubble', async () => {
+    mockApi({ ...SETTINGS, channels: { push: true, email: true, whatsapp: true }, emailDelayMinutes: 240 });
+    await renderScreen();
+    const box = screen.getByTestId('preview-box');
+    expect(within(box).getByText('Fastest')).toBeInTheDocument();
+    expect(within(box).getByText('WhatsApp number')).toBeInTheDocument();
+    expect(within(box).getByText('We email you within 4 hours of the restock')).toBeInTheDocument();
+    expect(within(box).getByText(/Get a browser alert/)).toBeInTheDocument();
+    const order = Array.from(box.querySelectorAll('.bp-body > *')).map((e) => e.className.split(' ')[0]);
+    expect(order[0]).toBe('bp-opt'); // WhatsApp row first
+    const msgs = screen.getByTestId('preview-messages');
+    expect(within(msgs).getByText(/Cotton Kurta \(M\) is back in stock/)).toBeInTheDocument();
+    expect(within(msgs).getByText('WhatsApp · you send it')).toBeInTheDocument();
+  });
+
+  test('Send on WhatsApp card: opens the wa.me link and marks it sent', async () => {
+    WA_TO_SEND = [{ id: 'a1', phone: '+919876543210', productTitle: 'Cotton Kurta', variantTitle: 'M', waLink: 'https://wa.me/919876543210?text=hi' }];
+    await renderScreen();
+    const card = await screen.findByRole('region', { name: 'Send on WhatsApp' });
+    expect(within(card).getByText('+919876543210')).toBeInTheDocument();
+    const link = within(card).getByRole('link', { name: 'Send on WhatsApp' });
+    expect(link).toHaveAttribute('href', 'https://wa.me/919876543210?text=hi');
+    expect(link).toHaveAttribute('target', '_blank');
+    fireEvent.click(link);
+    expect(apiSend).toHaveBeenCalledWith(`/api/restock/${SHOP}/whatsapp/a1/sent`, 'POST', {});
+    expect(screen.queryByRole('region', { name: 'Send on WhatsApp' })).toBeNull();
+  });
+
+  test('no WhatsApp alerts → no card', async () => {
+    await renderScreen();
+    expect(screen.queryByRole('region', { name: 'Send on WhatsApp' })).toBeNull();
   });
 });

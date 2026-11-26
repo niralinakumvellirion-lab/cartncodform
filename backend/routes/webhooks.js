@@ -831,6 +831,11 @@ async function runCustomersRedact(cr) {
     if (customerEmail) restockOr.push({ email: customerEmail.toLowerCase() });
     if (profileIds.length) restockOr.push({ profileId: { $in: profileIds } });
     if (pushTokens.length) restockOr.push({ pushToken: { $in: pushTokens } });
+    if (customerPhone) {
+      const { normalizePhone } = require('../utils/phone');
+      const e164 = normalizePhone(customerPhone) || customerPhone;
+      restockOr.push({ phone: { $in: [...new Set([customerPhone, e164])] } });
+    }
     if (restockOr.length) await RestockRequest.deleteMany({ shopDomain, $or: restockOr });
 
     await ComplianceRequest.updateOne(

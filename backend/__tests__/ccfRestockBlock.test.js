@@ -165,6 +165,42 @@ describe('ccf-restock.js', () => {
   });
 });
 
+describe('WhatsApp option', () => {
+  const WA = {
+    ...SETTINGS,
+    channels: { push: true, email: true, whatsapp: true },
+    texts: { ...SETTINGS.texts, whatsappPlaceholder: 'WhatsApp number', whatsappHint: 'Fastest · we message you the moment it’s back', emailHint: 'We email you within 1 hour of the restock' },
+  };
+
+  test('WhatsApp comes first with a Fastest badge; email shows its later-timing hint', async () => {
+    await load({ settings: WA, push: okPush() });
+    const opts = Array.from(document.querySelectorAll('.ccf-bis-body > *')).map((e) => e.className);
+    expect(opts[0]).toContain('ccf-bis-wa');
+    expect(q('.ccf-bis-wa .ccf-bis-badge').textContent).toBe('Fastest');
+    expect(q('.ccf-bis-wa .ccf-bis-hint').textContent).toMatch(/moment it’s back/);
+    expect(q('.ccf-bis-push').textContent).toMatch(/browser alert/);
+    expect(q('.ccf-bis-em .ccf-bis-hint').textContent).toBe('We email you within 1 hour of the restock');
+  });
+
+  test('bad number caught locally; good number sent as a WhatsApp request', async () => {
+    await load({ settings: WA });
+    q('.ccf-bis-phone').value = '123';
+    q('.ccf-bis-wa form').dispatchEvent(new Event('submit', { cancelable: true }));
+    expect(q('.ccf-bis-err').textContent).toBe('Enter a valid WhatsApp number');
+    expect(posts).toHaveLength(0);
+    q('.ccf-bis-phone').value = '98765 43210';
+    q('.ccf-bis-wa form').dispatchEvent(new Event('submit', { cancelable: true }));
+    await flush();
+    expect(posts[0]).toMatchObject({ channel: 'whatsapp', phone: '9876543210', variantId: '2' });
+    expect(q('.ccf-bis-done')).not.toBeNull();
+  });
+
+  test('WhatsApp off → no number box', async () => {
+    await load();
+    expect(q('.ccf-bis-phone')).toBeNull();
+  });
+});
+
 describe('ccf-push.js public hook', () => {
   test('exposes CCFPush.subscribe / canPush', () => {
     expect(PUSH_SCRIPT).toMatch(/window\.CCFPush\.subscribe = function/);

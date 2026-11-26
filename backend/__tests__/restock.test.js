@@ -59,11 +59,11 @@ beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
   await RestockRequest.syncIndexes();
-});
+}, 60000); // the in-memory database can take a while to start when the whole suite runs
 afterAll(async () => {
   await mongoose.disconnect();
   await mongod.stop();
-});
+}, 60000);
 beforeEach(async () => {
   jest.clearAllMocks();
   jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -83,7 +83,7 @@ describe('settings helpers', () => {
   test('defaults: off, both channels, default words', () => {
     const s = R.withDefaults(null);
     expect(s.enabled).toBe(false);
-    expect(s.channels).toEqual({ push: true, email: true });
+    expect(s.channels).toEqual({ push: true, email: true, whatsapp: false });
     expect(s.texts.buttonText).toBe('Notify me');
     expect(s.buttonRadius).toBe(8);
   });
@@ -98,9 +98,27 @@ describe('settings helpers', () => {
     expect(s.texts.evil).toBeUndefined();
     expect(s.texts.pushTitle).toBe('Back!');
     expect(s.buttonRadius).toBe(24);
-    expect(s.channels).toEqual({ push: true, email: false });
+    expect(s.channels).toEqual({ push: true, email: false, whatsapp: false });
     expect(() => R.sanitizeSettings({ accentColor: 'red' })).toThrow(/colour/);
     expect(() => R.sanitizeSettings({ channels: { push: false, email: false } })).toThrow(/at least one/);
+  });
+
+  test('WhatsApp channel and email delay settings', () => {
+    expect(R.withDefaults(null).channels.whatsapp).toBe(false);
+    expect(R.withDefaults(null).emailDelayMinutes).toBe(60);
+    const s = R.sanitizeSettings({ channels: { push: false, email: false, whatsapp: true }, emailDelayMinutes: 120 });
+    expect(s.channels).toEqual({ push: false, email: false, whatsapp: true });
+    expect(s.emailDelayMinutes).toBe(120);
+    expect(R.sanitizeSettings({ emailDelayMinutes: 7 }).emailDelayMinutes).toBe(60);
+    expect(R.publicSettings({ emailDelayMinutes: 240 }).texts.emailHint).toBe('We email you within 4 hours of the restock');
+    expect(R.publicSettings({ emailDelayMinutes: 0 }).texts.emailHint).toBe('We email you within a few minutes of the restock');
+    const w = R.sanitizeSubscribe(subscribeBody({ channel: 'whatsapp', phone: '098765 43210', email: '' }));
+    expect(w.phone).toBe('+919876543210');
+    expect(() => R.sanitizeSubscribe(subscribeBody({ channel: 'whatsapp', phone: '12345' }))).toThrow(/WhatsApp number/);
+    const m = R.buildMessage(R.withDefaults(null), { channel: 'whatsapp', phone: '+919876543210', productTitle: 'Kurta', variantTitle: 'M', productHandle: 'kurta', variantId: '2' }, SHOP, 'j9');
+    expect(m.text).toContain('Kurta (M) is back in stock');
+    expect(m.text).toContain('ccf_src=whatsapp&ccf_job=j9');
+    expect(m.waLink.startsWith('https://wa.me/919876543210?text=')).toBe(true);
   });
 
   test('public settings hide the message texts', () => {
@@ -116,7 +134,7 @@ describe('settings helpers', () => {
     expect(c.pushToken).toBeNull();
     expect(() => R.sanitizeSubscribe(subscribeBody({ variantId: 'abc' }))).toThrow(/size/);
     expect(() => R.sanitizeSubscribe(subscribeBody({ email: 'nope' }))).toThrow(/email/);
-    expect(() => R.sanitizeSubscribe(subscribeBody({ channel: 'sms' }))).toThrow(/push or email/);
+    expect(() => R.sanitizeSubscribe(subscribeBody({ channel: 'sms' }))).toThrow(/how to be notified/);
     expect(() => R.sanitizeSubscribe(subscribeBody({ channel: 'push', pushToken: 'short' }))).toThrow(/notifications/);
     const p = R.sanitizeSubscribe(subscribeBody({ channel: 'push', pushToken: TOKEN, email: '', imageUrl: 'javascript:x', productHandle: 'Bad Handle' }));
     expect(p.pushToken).toBe(TOKEN);
@@ -181,6 +199,21 @@ describe('storefront route', () => {
     expect(rows[0].expiresAt.getTime()).toBeGreaterThan(Date.now() + 59 * 24 * 3600 * 1000);
   });
 
+  test('subscribe: WhatsApp number saved in +91 format (only when the seller turned WhatsApp on)', async () => {
+    await RestockConfig.create({ shopDomain: SHOP, enabled: true });
+    const off = await run(proxyRouter, '/subscribe', 'post', proxyReq(subscribeBody({ channel: 'whatsapp', phone: '9876543210' })));
+    expect(off.statusCode).toBe(400);
+    await RestockConfig.updateOne({ shopDomain: SHOP }, { 'channels.whatsapp': true });
+    upsertProfile.mockResolvedValue({ _id: new mongoose.Types.ObjectId() });
+    const ok = await run(proxyRouter, '/subscribe', 'post', proxyReq(subscribeBody({ channel: 'whatsapp', phone: '98765 43210', email: '' })));
+    expect(ok.body.ok).toBe(true);
+    expect(upsertProfile.mock.calls[0][1]).toMatchObject({ phone: '+919876543210' });
+    // Two different shoppers can wait for the same size on WhatsApp.
+    const two = await run(proxyRouter, '/subscribe', 'post', proxyReq(subscribeBody({ channel: 'whatsapp', phone: '9123456780', email: '' })));
+    expect(two.body.ok).toBe(true);
+    expect(await RestockRequest.countDocuments({ channel: 'whatsapp' })).toBe(2);
+  });
+
   test('subscribe: push request keeps the token; bad body → 400; rate limited', async () => {
     await RestockConfig.create({ shopDomain: SHOP, enabled: true });
     const ok = await run(proxyRouter, '/subscribe', 'post', proxyReq(subscribeBody({ channel: 'push', pushToken: TOKEN })));
@@ -229,6 +262,31 @@ describe('admin route', () => {
     expect(res.body.last30).toEqual({ sent: 2, clicked: 1, orders: 1, revenue: 1299 });
   });
 
+  test('whatsapp: list of ready alerts with wa.me links; marking one sent logs a WhatsApp message', async () => {
+    const base = { shopDomain: SHOP, productId: '1', productTitle: 'Kurta', productHandle: 'kurta', variantId: '10', variantTitle: 'M', expiresAt: R.expiresAt() };
+    const ready = await RestockRequest.create({ ...base, channel: 'whatsapp', phone: '+919876543210', status: 'ready', readyAt: new Date() });
+    await RestockRequest.create({ ...base, channel: 'whatsapp', phone: '+919111111111', status: 'waiting' });
+    const list = await run(adminRouter, '/:shopDomain/whatsapp', 'get', adminReq());
+    expect(list.body.toSend).toHaveLength(1);
+    const item = list.body.toSend[0];
+    expect(item).toMatchObject({ phone: '+919876543210', productTitle: 'Kurta', variantTitle: 'M' });
+    const jobId = String((await RestockRequest.findById(ready._id).lean()).jobId);
+    expect(item.waLink).toContain('https://wa.me/919876543210?text=');
+    expect(decodeURIComponent(item.waLink)).toContain(`ccf_job=${jobId}`);
+
+    const sent = await run(adminRouter, '/:shopDomain/whatsapp/:id/sent', 'post', { ...adminReq(), params: { shopDomain: SHOP, id: item.id } });
+    expect(sent.body).toEqual({ ok: true });
+    expect(await RestockRequest.findById(ready._id).lean()).toMatchObject({ status: 'sent' });
+    const job = await ScheduledJob.findById(jobId).lean();
+    expect(job).toMatchObject({ channel: 'whatsapp', status: 'sent', signalType: 'back_in_stock', origin: 'manual' });
+    expect(job.messageText).toContain('Kurta (M) is back in stock');
+    const again = await run(adminRouter, '/:shopDomain/whatsapp/:id/sent', 'post', { ...adminReq(), params: { shopDomain: SHOP, id: item.id } });
+    expect(again.statusCode).toBe(404);
+    const overview = await run(adminRouter, '/:shopDomain/overview', 'get', adminReq());
+    expect(overview.body.whatsappToSend).toBe(0);
+    expect(overview.body.waiting[0]).toMatchObject({ whatsapp: 1 });
+  });
+
   test('waiting: who is waiting, newest first; push rows use the profile email; one size; this shop only', async () => {
     const prof = await Profile.create({ shopDomain: SHOP, identifiers: { emails: ['pushy@x.com'] } });
     const base = { shopDomain: SHOP, productId: '1', productTitle: 'Kurta', expiresAt: R.expiresAt() };
@@ -267,6 +325,7 @@ describe('sender (poller)', () => {
         productHandle: 'cotton-kurta', channel,
         pushToken: channel === 'push' ? `${TOKEN}_${i}` : null,
         email: channel === 'email' ? `s${i}@example.com` : null,
+        phone: channel === 'whatsapp' ? `+91987654321${i}` : null,
         createdAt: new Date(NOW.getTime() - (requests - i) * 60000), expiresAt: R.expiresAt(NOW),
       });
     }
@@ -280,6 +339,7 @@ describe('sender (poller)', () => {
       sendEmail: jest.fn().mockResolvedValue({ success: true }),
       isAtLimit: jest.fn().mockResolvedValue(false),
       isQuietNow: jest.fn().mockReturnValue(false),
+      sendOwnerPush: jest.fn().mockResolvedValue({ success: true, sent: 1 }),
     };
   });
 
@@ -365,7 +425,7 @@ describe('sender (poller)', () => {
   });
 
   test('email: sent with an unsubscribe-able profile; unsubscribed profile is skipped', async () => {
-    await setup({ channel: 'email', requests: 2 });
+    await setup({ channel: 'email', requests: 2, config: { emailDelayMinutes: 0 } });
     const ok = await Profile.create({ shopDomain: SHOP });
     const off = await Profile.create({ shopDomain: SHOP, suppressed: true });
     const rows = await RestockRequest.find({}).sort({ createdAt: 1 });
@@ -409,6 +469,42 @@ describe('sender (poller)', () => {
     await processRestock({ now: NOW, deps });
     expect((await RestockRequest.findById(rows[0]._id).lean()).status).toBe('expired');
     expect((await RestockRequest.findById(rows[1]._id).lean()).status).toBe('waiting');
+  });
+
+  test('WhatsApp: not sent automatically — marked ready and the seller is reminded once', async () => {
+    await setup({ channel: 'whatsapp', requests: 2 });
+    const [sum] = await processRestock({ now: NOW, deps });
+    expect(sum.whatsappReady).toBe(2);
+    expect(deps.sendPush).not.toHaveBeenCalled();
+    expect(deps.sendOwnerPush).toHaveBeenCalledTimes(1);
+    expect(deps.sendOwnerPush.mock.calls[0][1]).toBe('2 WhatsApp alerts to send');
+    expect(deps.sendOwnerPush.mock.calls[0][2]).toMatch(/Cotton Kurta \(M\) is back in stock/);
+    expect(await RestockRequest.countDocuments({ status: 'ready' })).toBe(2);
+    await processRestock({ now: new Date(NOW.getTime() + CHECK_EVERY_MS), deps });
+    expect(deps.sendOwnerPush).toHaveBeenCalledTimes(1); // not reminded again
+  });
+
+  test('email waits for the delay; push goes at once', async () => {
+    await setup({ channel: 'email', config: { emailDelayMinutes: 60 } });
+    await RestockRequest.create({ shopDomain: SHOP, productId: '111', variantId: '222', productTitle: 'Cotton Kurta', variantTitle: 'M', channel: 'push', pushToken: TOKEN, expiresAt: R.expiresAt(NOW) });
+    await processRestock({ now: NOW, deps });
+    expect(deps.sendPush).toHaveBeenCalledTimes(1);
+    expect(deps.sendEmail).not.toHaveBeenCalled();
+    await processRestock({ now: new Date(NOW.getTime() + 30 * 60000), deps });
+    expect(deps.sendEmail).not.toHaveBeenCalled();
+    await processRestock({ now: new Date(NOW.getTime() + 61 * 60000), deps });
+    expect(deps.sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  test('sold out again before the email delay → email waits for the next restock; WhatsApp back to waiting', async () => {
+    await setup({ channel: 'email', config: { emailDelayMinutes: 60 } });
+    await RestockRequest.create({ shopDomain: SHOP, productId: '111', variantId: '222', productTitle: 'Cotton Kurta', variantTitle: 'M', channel: 'whatsapp', phone: '+919999999999', expiresAt: R.expiresAt(NOW) });
+    await processRestock({ now: NOW, deps });
+    expect(await RestockRequest.countDocuments({ status: 'ready' })).toBe(1);
+    deps.graphQL.mockResolvedValue({ nodes: [{ id: 'gid://shopify/ProductVariant/222', availableForSale: false }] });
+    await processRestock({ now: new Date(NOW.getTime() + 61 * 60000), deps });
+    expect(deps.sendEmail).not.toHaveBeenCalled();
+    expect(await RestockRequest.countDocuments({ status: 'waiting', readyAt: null })).toBe(2);
   });
 
   test('stock check error is caught; nothing sent', async () => {

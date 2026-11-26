@@ -4,10 +4,10 @@
  * "Back in stock" — storefront side, through the App Proxy:
  *   GET  /apps/cartncodform/restock/config      public settings (box words, colour, channels)
  *   POST /apps/cartncodform/restock/subscribe   { productId, variantId, productTitle, variantTitle,
- *                                                 productHandle, imageUrl, channel, email|pushToken,
+ *                                                 productHandle, imageUrl, channel, email|pushToken|phone,
  *                                                 sessionId } → { ok }
  * The App Proxy signature is hard-enforced; `shop` and `logged_in_customer_id` come from the signed query.
- * Emails and push tokens are stored on the request only, and never logged.
+ * Emails, phone numbers and push tokens are stored on the request only, and never logged.
  */
 
 const express = require('express');
@@ -80,7 +80,8 @@ router.post('/subscribe', guard, async (req, res) => {
     }
 
     const base = { shopDomain: req.shop, variantId: clean.variantId, channel: clean.channel, status: 'waiting' };
-    const sameKey = clean.channel === 'email' ? { email: clean.email } : { pushToken: clean.pushToken };
+    const sameKey = clean.channel === 'email' ? { email: clean.email }
+      : clean.channel === 'whatsapp' ? { phone: clean.phone } : { pushToken: clean.pushToken };
     if (await RestockRequest.exists({ ...base, ...sameKey })) {
       return res.json({ ok: true, already: true });
     }
@@ -92,6 +93,7 @@ router.post('/subscribe', guard, async (req, res) => {
     const ids = {};
     if (req.loggedInCustomerId) ids.customerId = req.loggedInCustomerId;
     if (clean.email) ids.email = clean.email;
+    if (clean.phone) ids.phone = clean.phone;
     if (clean.sessionId) ids.sessionId = clean.sessionId;
     let profileId = null;
     if (Object.keys(ids).length) {
