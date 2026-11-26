@@ -279,11 +279,29 @@
           '<circle class="ccf-bis-ringtrack" cx="28" cy="28" r="' + RING_R + '" fill="none" stroke-width="5"/>' +
           '<circle class="ccf-bis-ringfill" cx="28" cy="28" r="' + RING_R + '" fill="none" stroke-width="5" stroke-linecap="round" ' +
           'stroke-dasharray="' + RING_C.toFixed(1) + '" stroke-dashoffset="' + off(from) + '"/></svg>';
-        w.appendChild(el('span', 'ccf-bis-pct', pct + '%'));
+        var pctEl = el('span', 'ccf-bis-pct', pct + '%');
+        w.appendChild(pctEl);
         var fill = w.querySelector('.ccf-bis-ringfill');
+        var target = pct;
+        var started = false;
+        function apply() { fill.setAttribute('stroke-dashoffset', off(target)); }
+        // Live updates (while the shopper types) move the ring and the % at once.
+        w.setPct = function (p) {
+          target = p;
+          lastPct[id] = p;
+          pctEl.textContent = p + '%';
+          w.setAttribute('aria-valuenow', String(p));
+          if (started) apply();
+        };
         lastPct[id] = pct;
-        if (from !== pct) setTimeout(function () { fill.setAttribute('stroke-dashoffset', off(pct)); }, 40);
+        setTimeout(function () { started = true; apply(); }, 40); // animate from the last % shown
         return w;
+      }
+
+      function validPhone(v) {
+        var raw = String(v || '').replace(/[\s()-]/g, '');
+        var num = raw.indexOf('+') === 0 ? raw : raw.replace(/^0+/, '');
+        return /^\+?\d{10,15}$/.test(num);
       }
 
       function draw(variant) {
@@ -324,7 +342,8 @@
         copy.appendChild(el('span', 'ccf-bis-sold', (t.boxTitle || 'Sorry, {size} is sold out').replace(/\{size\}/g, size)));
         copy.appendChild(el('span', 'ccf-bis-chance', t.chanceLabel || 'Your chance to be notified'));
         top.appendChild(copy);
-        top.appendChild(ring(id, pct));
+        var ringEl = ring(id, pct);
+        top.appendChild(ringEl);
         panel.appendChild(top);
 
         if (complete) {
@@ -406,7 +425,7 @@
           var known = readJSON('ccf_known_email');
           if (known && known.email) em.value = known.email;
           if (draft.email != null) em.value = draft.email;
-          em.addEventListener('input', function () { draft.email = em.value; });
+          em.addEventListener('input', function () { draft.email = em.value; liveUpdate(); });
           opts.appendChild(option('em', 'email', 'Email', MAIL, '', em, ch.whatsapp ? (t.emailHint || '') : '', ''));
         }
         if (ch.whatsapp) {
@@ -417,7 +436,7 @@
           ph.placeholder = t.whatsappPlaceholder || 'WhatsApp number';
           ph.setAttribute('aria-label', t.whatsappPlaceholder || 'WhatsApp number');
           if (draft.phone != null) ph.value = draft.phone;
-          ph.addEventListener('input', function () { draft.phone = ph.value; });
+          ph.addEventListener('input', function () { draft.phone = ph.value; liveUpdate(); });
           opts.appendChild(option('wa', 'whatsapp', 'WhatsApp', CHAT, 'Fastest', ph,
             t.whatsappHint || 'Fastest · we message you the moment it’s back', '+91'));
         }
@@ -494,6 +513,17 @@
         panel.appendChild(err);
         box.appendChild(panel);
         syncSubmit();
+        liveUpdate();
+
+        // The ring shows the chance live: what is already saved plus every picked option whose
+        // field is filled in correctly (email 20%, WhatsApp 80%, both 100%) — before Notify me.
+        function liveUpdate() {
+          var live = {};
+          Object.keys(got).forEach(function (k) { live[k] = got[k]; });
+          if (picked.email && inputs.email && EMAIL_RE.test(String(inputs.email.value || '').trim())) live.email = 1;
+          if (picked.whatsapp && inputs.whatsapp && validPhone(inputs.whatsapp.value)) live.whatsapp = 1;
+          ringEl.setPct(percentOf(live));
+        }
       }
       var draft = {}; // typed values survive redraws (picking a second option, errors)
 

@@ -253,6 +253,37 @@ describe('Email + WhatsApp: round selectors and the % ring', () => {
     expect(q('.ccf-bis-done').textContent).toBe('Done! We’ll tell you when M is back.');
   });
 
+  test('live: the ring shows 20% / 80% / 100% as valid details are typed, before Notify me', async () => {
+    await load({ settings: WA });
+    openPanel();
+    pick('em');
+    const em = q('.ccf-bis-email');
+    em.value = 'asha@exa';
+    em.dispatchEvent(new Event('input'));
+    expect(pct()).toBe('0%'); // not a valid email yet
+    em.value = 'asha@example.com';
+    em.dispatchEvent(new Event('input'));
+    expect(pct()).toBe('20%');
+    pick('wa');
+    expect(pct()).toBe('20%'); // email still counted after the redraw
+    const ph = q('.ccf-bis-phone');
+    ph.value = '98765 43210';
+    ph.dispatchEvent(new Event('input'));
+    expect(pct()).toBe('100%');
+    expect(q('.ccf-bis-ringwrap').getAttribute('aria-valuenow')).toBe('100');
+    pick('em'); // un-pick email → only WhatsApp counts
+    expect(pct()).toBe('80%');
+    expect(posts).toHaveLength(0); // nothing sent until Notify me
+  });
+
+  test('live: only WhatsApp typed → 80%', async () => {
+    await load({ settings: WA });
+    openPanel(); pick('wa');
+    q('.ccf-bis-phone').value = '9876543210';
+    q('.ccf-bis-phone').dispatchEvent(new Event('input'));
+    expect(pct()).toBe('80%');
+  });
+
   test('the seller’s split (70 / 30) is used and remembered after reload', async () => {
     const s = { ...WA, percent: { whatsapp: 70, email: 30 } };
     await load({ settings: s });
