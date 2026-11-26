@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import ThemeBlockSetup from '../components/ThemeBlockSetup';
 import BackInStockPreview, { RESTOCK_TEXT_DEFAULTS, RESTOCK_TEXT_MAX } from './BackInStockPreview';
@@ -37,6 +38,9 @@ export default function BackInStockScreen({ shop }) {
   const [previewShow, setPreviewShow] = useState('both');
   const [highlight, setHighlight] = useState(null);
   const [boxView, setBoxView] = useState('form');
+  const [openSize, setOpenSize] = useState(null); // variantId whose people list is open
+  const [people, setPeople] = useState({}); // variantId → { list } | { loading } | { error }
+  const router = useRouter();
   const fitRef = useRef(null);
   const layoutRef = useRef(null);
   const [fit, setFit] = useState({ scale: 1, height: 0 });
@@ -105,6 +109,18 @@ export default function BackInStockScreen({ shop }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function toggleSize(variantId) {
+    if (openSize === variantId) { setOpenSize(null); return; }
+    setOpenSize(variantId);
+    setPeople((p) => ({ ...p, [variantId]: { loading: true } }));
+    apiGet(`/api/restock/${shop}/waiting?variantId=${encodeURIComponent(variantId)}`)
+      .then((d) => setPeople((p) => ({ ...p, [variantId]: { list: d.people || [] } })))
+      .catch(() => setPeople((p) => ({ ...p, [variantId]: { error: true } })));
+  }
+  function openCustomer(profileId) {
+    router.push(`/admin/customers/${encodeURIComponent(profileId)}?shop=${encodeURIComponent(shop)}`);
   }
 
   // Focus/click in a section → preview shows that part and outlines the field's element (data-hl).
@@ -214,11 +230,12 @@ export default function BackInStockScreen({ shop }) {
                     <th style={{ ...ui.th, textAlign: 'right' }}>Waiting</th>
                     <th style={ui.th}>By</th>
                     <th style={ui.th}>Since</th>
+                    <th style={ui.th}><span style={ui.srOnly}>People</span></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ov.waiting.map((w) => (
-                    <tr key={w.variantId}>
+                  {ov.waiting.map((w) => (<Fragment key={w.variantId}>
+                    <tr>
                       <td style={ui.td}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           {w.imageUrl
@@ -231,8 +248,26 @@ export default function BackInStockScreen({ shop }) {
                       <td style={{ ...ui.td, textAlign: 'right', fontWeight: 600 }}>{w.count}</td>
                       <td style={{ ...ui.td, color: '#616161' }}>{[w.push ? `${w.push} push` : '', w.email ? `${w.email} email` : ''].filter(Boolean).join(' · ')}</td>
                       <td style={{ ...ui.td, color: '#616161' }}>{waitingSince(w.since)}</td>
+                      <td style={{ ...ui.td, textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          style={ui.linkBtn}
+                          aria-expanded={openSize === w.variantId}
+                          aria-label={`${openSize === w.variantId ? 'Hide' : 'View'} who is waiting for ${w.productTitle || 'Product'} ${w.variantTitle || ''}`.trim()}
+                          onClick={() => toggleSize(w.variantId)}
+                        >
+                          {openSize === w.variantId ? 'Hide' : 'View'}
+                        </button>
+                      </td>
                     </tr>
-                  ))}
+                    {openSize === w.variantId && (
+                      <tr>
+                        <td colSpan={6} style={{ ...ui.td, background: '#FAFAFA', padding: '6px 10px 10px' }}>
+                          <WaitingPeople data={people[w.variantId]} onOpen={openCustomer} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>))}
                 </tbody>
               </table>
             )}
@@ -368,6 +403,37 @@ export default function BackInStockScreen({ shop }) {
   );
 }
 
+/** People waiting for one size: email (or push), logged-in customer badge, date, link to the customer. */
+export function WaitingPeople({ data, onOpen }) {
+  if (!data || data.loading) return <p style={{ ...ui.hint, margin: 0 }}>Loading…</p>;
+  if (data.error) return <p style={{ ...ui.error, margin: 0 }}>Could not load who is waiting.</p>;
+  if (!data.list.length) return <p style={{ ...ui.hint, margin: 0 }}>No one is waiting for this size any more.</p>;
+  return (
+    <ul style={ui.people} aria-label="People waiting">
+      {data.list.map((p) => (
+        <li key={p.id} style={ui.person}>
+          <span style={ui.personIcon} aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              {p.channel === 'push' ? ICONS.bell : <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>}
+            </svg>
+          </span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={ui.personMain}>{p.email || 'Push subscriber (no email yet)'}</span>
+            <span style={ui.hint}>
+              {p.channel === 'push' ? 'Push' : 'Email'}
+              {p.customerId ? ' · Logged-in customer' : ''}
+              {' · '}{new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+            </span>
+          </span>
+          {p.profileId && (
+            <button type="button" style={ui.linkBtn} onClick={() => onOpen(p.profileId)}>Open customer</button>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Stat({ label, value, sub }) {
   return (
     <div style={ui.stat}>
@@ -429,6 +495,12 @@ const ui = {
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { textAlign: 'left', padding: '8px 6px', fontSize: 11, color: '#616161', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid #E3E3E3' },
   td: { padding: '8px 6px', fontSize: 13, borderBottom: '1px solid #F1F1F1' },
+  linkBtn: { background: 'none', border: 'none', padding: 0, color: '#2C6ECB', fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' },
+  srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' },
+  people: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
+  person: { display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: '1px solid #EBEBEB', borderRadius: 8, padding: '8px 10px' },
+  personIcon: { width: 28, height: 28, borderRadius: '50%', background: '#F1F1F1', color: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  personMain: { display: 'block', fontSize: 13, fontWeight: 500, color: '#303030', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   thumb: { width: 28, height: 28, borderRadius: 6, background: '#EEE', display: 'inline-block' },
   save: { background: '#303030', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 1px 0 rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.12)' },
   ok: { fontSize: 13, color: '#059669' },

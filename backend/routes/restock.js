@@ -5,7 +5,9 @@
  *   GET /api/restock/:shopDomain/config     settings with defaults
  *   PUT /api/restock/:shopDomain/config     save settings ({ settings })
  *   GET /api/restock/:shopDomain/overview   waiting list per product/size + last-30-days results
- * All: requireAuth + requireStoreOwner, scoped by the verified shopDomain. No shopper emails are returned.
+ *   GET /api/restock/:shopDomain/waiting    who is waiting (?variantId= for one size)
+ * All: requireAuth + requireStoreOwner, scoped by the verified shopDomain. Only /waiting returns shopper
+ * emails (the store's own customers, for the owner).
  */
 
 const express = require('express');
@@ -14,6 +16,7 @@ const RestockConfig = require('../models/RestockConfig');
 const RestockRequest = require('../models/RestockRequest');
 const ScheduledJob = require('../models/ScheduledJob');
 const AttributedEvent = require('../models/AttributedEvent');
+const Profile = require('../models/Profile');
 const { sanitizeSettings, withDefaults } = require('../utils/restock');
 
 const router = express.Router();
@@ -105,6 +108,48 @@ router.get('/:shopDomain/overview', requireAuth, requireStoreOwner, async (req, 
   } catch (err) {
     console.error('[restock] overview error:', err.message);
     return res.status(500).json({ error: 'Could not load the waiting list' });
+  }
+});
+
+// Who is waiting (store owner only): email, or "push" with the profile's known email, customer id,
+// profile link and date. Optional ?variantId= narrows it to one size. Newest first, max 200.
+router.get('/:shopDomain/waiting', requireAuth, requireStoreOwner, async (req, res) => {
+  const shop = req.store.shopDomain;
+  const variantId = String(req.query.variantId || '');
+  const filter = { shopDomain: shop, status: 'waiting' };
+  if (variantId) {
+    if (!/^\d{1,20}$/.test(variantId)) return res.status(400).json({ error: 'Bad size id' });
+    filter.variantId = variantId;
+  }
+  try {
+    const rows = await RestockRequest.find(
+      filter,
+      'variantId productTitle variantTitle channel email customerId profileId createdAt'
+    ).sort({ createdAt: -1 }).limit(200).lean();
+    const profileIds = rows.filter((r) => r.profileId && !r.email).map((r) => r.profileId);
+    const profiles = profileIds.length
+      ? await Profile.find({ _id: { $in: profileIds }, shopDomain: shop }, 'identifiers.emails channels.email.address').lean()
+      : [];
+    const emailOf = new Map(profiles.map((p) => [
+      String(p._id),
+      (p.channels && p.channels.email && p.channels.email.address) || (p.identifiers && p.identifiers.emails && p.identifiers.emails[0]) || null,
+    ]));
+    return res.json({
+      people: rows.map((r) => ({
+        id: String(r._id),
+        variantId: r.variantId,
+        productTitle: r.productTitle,
+        variantTitle: r.variantTitle && r.variantTitle !== 'Default Title' ? r.variantTitle : '',
+        channel: r.channel,
+        email: r.email || (r.profileId ? emailOf.get(String(r.profileId)) || null : null),
+        customerId: r.customerId || null,
+        profileId: r.profileId ? String(r.profileId) : null,
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error('[restock] waiting list error:', err.message);
+    return res.status(500).json({ error: 'Could not load who is waiting' });
   }
 });
 

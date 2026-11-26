@@ -228,6 +228,27 @@ describe('admin route', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/@x\.com/);
     expect(res.body.last30).toEqual({ sent: 2, clicked: 1, orders: 1, revenue: 1299 });
   });
+
+  test('waiting: who is waiting, newest first; push rows use the profile email; one size; this shop only', async () => {
+    const prof = await Profile.create({ shopDomain: SHOP, identifiers: { emails: ['pushy@x.com'] } });
+    const base = { shopDomain: SHOP, productId: '1', productTitle: 'Kurta', expiresAt: R.expiresAt() };
+    await RestockRequest.create([
+      { ...base, variantId: '10', variantTitle: 'M', channel: 'email', email: 'a@x.com', customerId: '55', createdAt: new Date(Date.now() - 60000) },
+      { ...base, variantId: '10', variantTitle: 'M', channel: 'push', pushToken: TOKEN, profileId: prof._id },
+      { ...base, variantId: '11', variantTitle: 'L', channel: 'email', email: 'b@x.com' },
+      { ...base, variantId: '10', variantTitle: 'M', channel: 'email', email: 'old@x.com', status: 'sent' },
+      { ...base, shopDomain: 'other.myshopify.com', variantId: '10', channel: 'email', email: 'z@x.com' },
+    ]);
+    const res = await run(adminRouter, '/:shopDomain/waiting', 'get', { ...adminReq(), query: { variantId: '10' } });
+    expect(res.body.people.map((p) => p.email)).toEqual(['pushy@x.com', 'a@x.com']);
+    expect(res.body.people[0]).toMatchObject({ channel: 'push', profileId: String(prof._id), variantTitle: 'M' });
+    expect(res.body.people[1]).toMatchObject({ channel: 'email', customerId: '55' });
+    expect(JSON.stringify(res.body)).not.toContain(TOKEN);
+    const all = await run(adminRouter, '/:shopDomain/waiting', 'get', { ...adminReq(), query: {} });
+    expect(all.body.people).toHaveLength(3);
+    const bad = await run(adminRouter, '/:shopDomain/waiting', 'get', { ...adminReq(), query: { variantId: 'x' } });
+    expect(bad.statusCode).toBe(400);
+  });
 });
 
 // ── Sender ───────────────────────────────────────────────────────────────────

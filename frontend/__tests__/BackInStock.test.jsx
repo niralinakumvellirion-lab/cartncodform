@@ -7,6 +7,9 @@ import { apiGet, apiSend } from '../../../lib/api';
 import BackInStockScreen, { cornerValue, formatMoney, waitingSince } from '../app/admin/screens/BackInStock';
 import BackInStockPreview, { restockText, restockRadius, RESTOCK_TEXT_DEFAULTS } from '../app/admin/screens/BackInStockPreview';
 
+const mockPush = jest.fn();
+jest.mock('next/navigation', () => ({ useRouter: () => ({ push: mockPush }) }));
+
 const SHOP = 'test.myshopify.com';
 const SETTINGS = {
   enabled: true, channels: { push: true, email: true }, accentColor: '#111827', buttonRadius: 8,
@@ -18,9 +21,16 @@ const OVERVIEW = {
   last30: { sent: 12, clicked: 5, orders: 2, revenue: 2598 },
 };
 
+const PEOPLE = [
+  { id: 'r1', variantId: '10', channel: 'email', email: 'asha@example.com', customerId: '55', profileId: 'p1', createdAt: new Date().toISOString() },
+  { id: 'r2', variantId: '10', channel: 'push', email: null, customerId: null, profileId: null, createdAt: new Date().toISOString() },
+];
+
 function mockApi(settings = SETTINGS, overview = OVERVIEW) {
   apiGet.mockImplementation((url) => Promise.resolve(
-    url.endsWith('/overview') ? JSON.parse(JSON.stringify(overview)) : { settings: JSON.parse(JSON.stringify(settings)) }
+    url.endsWith('/overview') ? JSON.parse(JSON.stringify(overview))
+      : url.includes('/waiting') ? { people: PEOPLE }
+        : { settings: JSON.parse(JSON.stringify(settings)) }
   ));
   apiSend.mockImplementation((url, method, body) => Promise.resolve({ settings: body.settings }));
 }
@@ -71,6 +81,22 @@ describe('Back in stock screen', () => {
     const list = screen.getByRole('table', { name: 'Waiting list' });
     expect(within(list).getByText('Cotton Kurta')).toBeInTheDocument();
     expect(within(list).getByText('1 push · 1 email')).toBeInTheDocument();
+  });
+
+  test('View shows who is waiting for a size; Open customer goes to the customer', async () => {
+    await renderScreen();
+    const list = await screen.findByRole('table', { name: 'Waiting list' });
+    const view = within(list).getByRole('button', { name: /View who is waiting for Cotton Kurta M/ });
+    fireEvent.click(view);
+    expect(apiGet).toHaveBeenCalledWith(`/api/restock/${SHOP}/waiting?variantId=10`);
+    const people = await screen.findByRole('list', { name: 'People waiting' });
+    expect(within(people).getByText('asha@example.com')).toBeInTheDocument();
+    expect(within(people).getByText(/Logged-in customer/)).toBeInTheDocument();
+    expect(within(people).getByText('Push subscriber (no email yet)')).toBeInTheDocument();
+    fireEvent.click(within(people).getByRole('button', { name: 'Open customer' }));
+    expect(mockPush).toHaveBeenCalledWith(`/admin/customers/p1?shop=${encodeURIComponent(SHOP)}`);
+    fireEvent.click(within(list).getByRole('button', { name: /Hide who is waiting/ }));
+    expect(screen.queryByRole('list', { name: 'People waiting' })).toBeNull();
   });
 
   test('empty waiting list shows a tip', async () => {
