@@ -68,7 +68,9 @@ const profileSchema = new Schema({
     {
       // last 20 only, capped in profileService
       channel: String,
-      type: String,
+      // Must be { type: String }: a bare `type: String` key makes Mongoose
+      // read the whole item as a type declaration (messages → [String]).
+      type: { type: String },
       sentAt: Date,
       outcome: {
         type: String,
