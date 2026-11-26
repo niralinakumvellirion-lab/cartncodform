@@ -236,7 +236,7 @@ const CSS = `
 .bp-mailbtn{display:inline-block;background:var(--bp-accent);color:#fff;padding:8px 16px;border-radius:7px;font-size:12.5px;font-weight:600}
 .bp-unsub{font-size:10.5px;color:#9CA3AF;text-decoration:underline}
 .bp-sample{font-size:11.5px;color:#8A8A8A;margin-top:10px!important}
-.bp .is-hl{outline:1.5px dashed #6366F1;outline-offset:3px;border-radius:6px;animation:bp-hl .35s ease-out}
-@keyframes bp-hl{from{outline-color:transparent;outline-offset:6px}to{outline-color:#6366F1;outline-offset:3px}}
+.bp .is-hl{outline:1px dashed #A5B4FC;outline-offset:2px;border-radius:6px;animation:bp-hl .35s ease-out}
+@keyframes bp-hl{from{outline-color:transparent;outline-offset:4px}to{outline-color:#A5B4FC;outline-offset:2px}}
 @media (prefers-reduced-motion:reduce){.bp .is-hl{animation:none}}
 `;
