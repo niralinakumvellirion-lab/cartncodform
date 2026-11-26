@@ -11,6 +11,8 @@
   var KG_PER_LB = 0.45359237;
   var RULER = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z"/><path d="m7 12 2 2M10 9l2 2M13 6l2 2"/></svg>';
 
+var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>';
+
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -35,9 +37,21 @@
       '.ccf-sf{margin:14px 0;font-family:inherit;color:#303030;line-height:1.45;-webkit-font-smoothing:antialiased}',
       '.ccf-sf button{font-family:inherit;letter-spacing:normal;text-transform:none;min-height:0}',
       // trigger
-      '.ccf-sf-open{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:4px 0;color:' + accent + ';font-size:14px;font-weight:500;cursor:pointer;text-decoration:underline;text-underline-offset:4px}',
-      '.ccf-sf-open:hover{text-decoration-thickness:2px}',
-      '.ccf-sf-hint{font-size:12px;color:#616161;margin-left:6px}',
+      '.ccf-sf-trigger{width:100%;display:flex;align-items:center;gap:12px;padding:12px 14px;margin:0;border:1px solid ' + accent + '40;border-radius:14px;background:linear-gradient(135deg,' + accent + '0F,' + accent + '05);color:#303030;cursor:pointer;text-align:left;transition:border-color .15s,box-shadow .15s,transform .15s}',
+      '.ccf-sf-trigger:hover{border-color:' + accent + ';box-shadow:0 6px 18px rgba(17,24,39,.08);transform:translateY(-1px)}',
+      '.ccf-sf-trigger:focus-visible{outline:2px solid ' + accent + ';outline-offset:2px}',
+      '.ccf-sf-icon{position:relative;width:42px;height:42px;border-radius:50%;background:#fff;color:' + accent + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px ' + accent + '33}',
+      '.ccf-sf-icon::after{content:"";position:absolute;inset:-1px;border-radius:50%;border:2px solid ' + accent + ';opacity:0;animation:ccf-sf-pulse 2.2s ease-out 1s 3}',
+      '@keyframes ccf-sf-pulse{0%{transform:scale(1);opacity:.45}100%{transform:scale(1.45);opacity:0}}',
+      '@media (prefers-reduced-motion:reduce){.ccf-sf-icon::after{animation:none}.ccf-sf-trigger{transition:none}}',
+      '.ccf-sf-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
+      '.ccf-sf-card-title{font-size:15px;font-weight:600;line-height:1.3}',
+      '.ccf-sf-card-sub{font-size:12.5px;color:#616161;line-height:1.35}',
+      '.ccf-sf-cta{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;background:' + accent + ';color:#fff;border:1px solid ' + accent + ';border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}',
+      '.ccf-sf-trigger.is-done .ccf-sf-icon{background:' + accent + ';color:#fff}',
+      '.ccf-sf-trigger.is-done .ccf-sf-icon::after{display:none}',
+      '.ccf-sf-trigger.is-done .ccf-sf-cta{background:#fff;color:' + accent + '}',
+      '@media (max-width:420px){.ccf-sf-trigger{padding:11px 12px;gap:10px}.ccf-sf-icon{width:38px;height:38px}.ccf-sf-card-title{font-size:14px}.ccf-sf-cta{padding:7px 11px;font-size:12px}}',
       // panel
       '.ccf-sf-panel{margin-top:12px;border:1px solid #E5E7EB;border-radius:16px;background:#fff;box-shadow:0 10px 30px rgba(17,24,39,.08);overflow:hidden}',
       '.ccf-sf-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 20px 0}',
@@ -166,6 +180,40 @@
     return chest.status === 'snug' ? 18 : chest.status === 'roomy' ? 82 : 50;
   }
 
+  // ── Placement ──────────────────────────────────────────────────────────────
+  // Shoppers miss the button when the theme puts the block under the description, so we move it
+  // to just below the theme's variant picker (outside it: themes redraw the picker on each change).
+  function placeNearSizePicker(root, optionName) {
+    var name = String(optionName || 'size').toLowerCase();
+    var scope = root.closest('.shopify-section') || document;
+    if (!scope.querySelector('form[action*="/cart/add"], fieldset, select')) scope = document;
+    var mine = function (n) { return n.closest('[class*="ccf-"]'); };
+    var anchor = null;
+    var sets = scope.querySelectorAll('fieldset');
+    for (var i = 0; i < sets.length && !anchor; i++) {
+      var lg = sets[i].querySelector('legend');
+      var t = (lg ? lg.textContent : '').toLowerCase();
+      if (!mine(sets[i]) && (t.indexOf(name) !== -1 || t.indexOf('size') !== -1)) anchor = sets[i];
+    }
+    if (!anchor) {
+      var sels = scope.querySelectorAll('select');
+      for (var j = 0; j < sels.length && !anchor; j++) {
+        var sel = sels[j];
+        var label = sel.id && document.querySelector('label[for="' + sel.id + '"]');
+        var ctx = (String(sel.name) + ' ' + (label ? label.textContent : '') + ' ' + (sel.getAttribute('aria-label') || '')).toLowerCase();
+        if (!mine(sel) && (ctx.indexOf(name) !== -1 || ctx.indexOf('size') !== -1)) {
+          anchor = sel.closest('.product-form__input, .selector-wrapper') || sel.parentElement;
+        }
+      }
+    }
+    if (!anchor) return false;
+    var outer = anchor.closest('variant-selects, variant-radios, variant-picker, product-variant-picker, .product-form__variants, .variant-picker');
+    if (outer) anchor = outer;
+    if (anchor === root || anchor.contains(root) || root.contains(anchor) || !anchor.parentNode) return false;
+    anchor.parentNode.insertBefore(root, anchor.nextSibling);
+    return true;
+  }
+
   // ── Main ───────────────────────────────────────────────────────────────────
 
   function init(root, settings) {
@@ -195,25 +243,34 @@
       showChart: false,
     };
 
+    var design = root.getAttribute('data-design-mode') === 'true' || !!(window.Shopify && window.Shopify.designMode);
+    if (!design) placeNearSizePicker(root, sizeOption);
+
     var wrap = el('div', 'ccf-sf');
-    var openRow = el('div');
-    var open = el('button', 'ccf-sf-open');
+    var open = el('button', 'ccf-sf-open ccf-sf-trigger');
     open.type = 'button';
     open.setAttribute('aria-expanded', 'false');
-    var hint = el('span', 'ccf-sf-hint', 'Takes 20 seconds');
-    openRow.appendChild(open);
-    openRow.appendChild(hint);
     var panel = el('div', 'ccf-sf-panel');
     panel.hidden = true;
-    wrap.appendChild(openRow);
+    wrap.appendChild(open);
     wrap.appendChild(panel);
     root.appendChild(wrap);
 
-    function setOpenLabel(text) {
-      open.innerHTML = RULER;
-      open.appendChild(document.createTextNode(text));
+    // The card: "Not sure about your size?" until the shopper has a size, then "Your size: M".
+    function setOpenLabel(size) {
+      open.innerHTML = '';
+      open.classList.toggle('is-done', !!size);
+      var icon = el('span', 'ccf-sf-icon');
+      icon.innerHTML = size ? CHECK : RULER;
+      var copy = el('span', 'ccf-sf-copy');
+      copy.appendChild(el('span', 'ccf-sf-card-title', size ? 'Your size: ' + size : 'Not sure about your size?'));
+      copy.appendChild(el('span', 'ccf-sf-card-sub', size ? 'Based on your answers · tap to change' : '3 quick questions · takes 20 seconds'));
+      open.appendChild(icon);
+      open.appendChild(copy);
+      open.appendChild(el('span', 'ccf-sf-cta', size ? 'Change' : (settings.buttonText || 'Find my size') + ' →'));
     }
-    setOpenLabel(settings.buttonText || 'Find my size');
+    var known = saved.size && (!sizeValues.length || sizeValues.some(function (v) { return v.toLowerCase() === String(saved.size).toLowerCase(); }));
+    setOpenLabel(known ? saved.size : '');
 
     function close() {
       panel.hidden = true;
@@ -342,6 +399,7 @@
       writeJSON(STORE_KEY, {
         gender: state.gender, heightCm: state.heightCm, weightKg: state.weightKg,
         hUnit: state.hUnit, wUnit: state.wUnit, shape: state.shape, fit: state.fit,
+        size: (readJSON(STORE_KEY) || {}).size,
       });
     }
 
@@ -500,7 +558,13 @@
             if (available) {
               var ok = selectSizeOnPage(sizeOption, r.size);
               state.error = ok ? '' : 'Choose ' + r.size + ' from the sizes above.';
-              if (ok) { close(); setOpenLabel('Your size: ' + r.size); }
+              if (ok) {
+                close();
+                setOpenLabel(r.size);
+                var a = readJSON(STORE_KEY) || {};
+                a.size = r.size;
+                writeJSON(STORE_KEY, a);
+              }
               else draw();
             } else {
               close();
@@ -527,8 +591,15 @@
     var hasSize = !!root.getAttribute('data-size-option');
     var tags = (root.getAttribute('data-tags') || '').toLowerCase().split('|');
 
-    fetch(PROXY + '/config?shop=' + encodeURIComponent(shop), { headers: { Accept: 'application/json' } })
-      .then(function (r) { return r.json(); })
+    function getConfig(tries) {
+      return fetch(PROXY + '/config?shop=' + encodeURIComponent(shop), { headers: { Accept: 'application/json' } })
+        .then(function (r) { if (!r.ok) throw new Error('config ' + r.status); return r.json(); })
+        .catch(function (e) {
+          if (tries <= 0) throw e;
+          return new Promise(function (res) { setTimeout(res, 1500); }).then(function () { return getConfig(tries - 1); });
+        });
+    }
+    getConfig(1)
       .then(function (d) {
         var s = d && d.settings;
         var tagOk = s && (!s.productTag || tags.indexOf(String(s.productTag).toLowerCase()) !== -1);

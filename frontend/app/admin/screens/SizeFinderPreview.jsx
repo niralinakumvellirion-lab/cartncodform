@@ -135,9 +135,13 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the button.</p>
           ) : (
             <div className="sfp-info">
-              <div className="sfp-trigger">
-                <span className="sfp-open"><Ruler />{settings.buttonText || 'Find my size'}</span>
-                <span className="sfp-hint">Takes 20 seconds</span>
+              <div className="sfp-card">
+                <span className="sfp-icon"><Ruler /></span>
+                <span className="sfp-copy">
+                  <span className="sfp-card-title">Not sure about your size?</span>
+                  <span className="sfp-card-sub">3 quick questions · takes 20 seconds</span>
+                </span>
+                <span className="sfp-cta">{settings.buttonText || 'Find my size'} →</span>
               </div>
 
               <div className="sfp-panel">
@@ -266,9 +270,16 @@ const CSS = `
 .sfp-sizes{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
 .sfp-sizes span{min-width:40px;text-align:center;border:1px solid #D1D5DB;border-radius:8px;padding:5px 9px;font-size:13px}
 .sfp-sizes span.on{border:2px solid #303030;padding:4px 8px;font-weight:500}
-.sfp-trigger{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.sfp-open{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:4px 0;color:var(--sfp-accent);font-size:14px;font-weight:500;cursor:pointer;text-decoration:underline;text-underline-offset:4px}
-.sfp-hint{font-size:12px;color:#616161}
+.sfp-card{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid color-mix(in srgb,var(--sfp-accent) 25%,transparent);border-radius:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--sfp-accent) 6%,#fff),color-mix(in srgb,var(--sfp-accent) 2%,#fff))}
+.sfp-icon{width:42px;height:42px;border-radius:50%;background:#fff;color:var(--sfp-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px color-mix(in srgb,var(--sfp-accent) 20%,transparent)}
+.sfp-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sfp-card-title{font-size:15px;font-weight:600;line-height:1.3}
+.sfp-card-sub{font-size:12.5px;color:#616161}
+.sfp-cta{flex-shrink:0;background:var(--sfp-accent);color:#fff;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}
+.sfp-frame.is-mobile .sfp-card{padding:11px 12px;gap:10px}
+.sfp-frame.is-mobile .sfp-icon{width:38px;height:38px}
+.sfp-frame.is-mobile .sfp-card-title{font-size:14px}
+.sfp-frame.is-mobile .sfp-cta{padding:7px 11px;font-size:12px}
 .sfp-warn{font-size:13px;color:#B45309;background:#FFFBEB;border-radius:8px;padding:8px 10px;margin:0}
 .sfp-panel{margin-top:10px;border:1px solid #E5E7EB;border-radius:16px;background:#fff;box-shadow:0 10px 30px rgba(17,24,39,.08);overflow:hidden}
 .sfp-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 0}
@@ -335,7 +346,7 @@ const CSS = `
 .sfp-views button{border:0;background:transparent;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;color:#616161;cursor:pointer}
 .sfp-views button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .sfp-static{pointer-events:none;user-select:none}
-.sfp-open,.sfp-close,.sfp-main,.sfp-ghost,.sfp-link{display:inline-flex;align-items:center;justify-content:center}
+.sfp-close,.sfp-main,.sfp-ghost,.sfp-link{display:inline-flex;align-items:center;justify-content:center}
 .sfp-actions .sfp-main,.sfp-actions .sfp-ghost{display:flex}
 .sfp-loading{padding:18px 0;text-align:center}
 .sfp-sample{font-size:12px;color:#8A8A8A;margin:10px 2px 0}

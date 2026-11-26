@@ -26,15 +26,15 @@ let sizeEvents = [];
 // One listener for the whole file (a listener per test would record each event several times).
 document.addEventListener('ccf:size-selected', (e) => sizeEvents.push(e.detail));
 
-async function load({ settings = SETTINGS, tags = 'kurta', sizeOption = 'Size', sizeValues = 'S|M|L', design = 'false', recommend } = {}) {
+async function load({ settings = SETTINGS, tags = 'kurta', sizeOption = 'Size', sizeValues = 'S|M|L', design = 'false', recommend, keepStorage = false, pageHtml, configFailures = 0 } = {}) {
   document.head.innerHTML = '';
   document.body.innerHTML = '';
-  localStorage.clear();
+  if (!keepStorage) localStorage.clear();
   recommendBodies = [];
   sizeEvents = [];
 
   // Theme product form with a Size option as radio buttons
-  document.body.innerHTML = `
+  document.body.innerHTML = pageHtml || `
     <form action="/cart/add">
       <fieldset><legend>Size</legend>
         <input type="radio" name="Size" value="S" checked>
@@ -47,6 +47,7 @@ async function load({ settings = SETTINGS, tags = 'kurta', sizeOption = 'Size', 
 
   global.fetch = jest.fn((url, opts) => {
     if (String(url).indexOf('/size-finder/config') !== -1) {
+      if (configFailures > 0) { configFailures -= 1; return Promise.reject(new Error('network')); }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, settings }) });
     }
     if (String(url).indexOf('/size-finder/recommend') !== -1) {
@@ -195,5 +196,67 @@ describe('ccf-size.js design details', () => {
     expect(q('.ccf-sf-meter-dot').style.left).toBe('50%'); // chest "right"
     btn('Close').click();
     expect(q('.ccf-sf-panel').hidden).toBe(true);
+  });
+});
+
+describe('ccf-size.js — card that shoppers notice', () => {
+  test('a clear card: question, short promise and the button text', async () => {
+    await load();
+    const card = q('.ccf-sf-trigger');
+    expect(card.querySelector('.ccf-sf-card-title').textContent).toBe('Not sure about your size?');
+    expect(card.querySelector('.ccf-sf-card-sub').textContent).toMatch(/takes 20 seconds/);
+    expect(card.querySelector('.ccf-sf-cta').textContent).toBe('Find my size →');
+  });
+
+  test('moves right under the Size picker, even when the theme put the block lower down', async () => {
+    await load({ pageHtml: `
+      <div class="shopify-section">
+        <form action="/cart/add">
+          <variant-selects id="vs"><fieldset><legend>Color</legend></fieldset><fieldset><legend>Size</legend>
+            <input type="radio" name="Size" value="S" checked><input type="radio" name="Size" value="M"></fieldset></variant-selects>
+          <div id="price">₹999</div>
+        </form>
+        <p id="desc">Description</p>
+        <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>
+      </div>` });
+    // Placed after the whole variant picker (outside it, because themes redraw the picker).
+    expect(q('#vs').nextElementSibling.id).toBe('ccf-sf-root');
+  });
+
+  test('stays where it is in the theme editor', async () => {
+    await load({ design: 'true' });
+    expect(q('form').nextElementSibling.id).toBe('ccf-sf-root');
+  });
+
+  test('after choosing, the card shows "Your size" and remembers it on the next visit', async () => {
+    await load();
+    q('.ccf-sf-open').click();
+    btn('Continue').click();
+    btn('See my size').click();
+    await flush(); await flush();
+    btn('Select size M').click();
+    expect(q('.ccf-sf-trigger').classList.contains('is-done')).toBe(true);
+    expect(q('.ccf-sf-cta').textContent).toBe('Change');
+
+    await load({ keepStorage: true });
+    expect(q('.ccf-sf-card-title').textContent).toBe('Your size: M');
+  });
+
+  test('a remembered size the product does not sell is not shown', async () => {
+    localStorage.setItem('ccf_size_answers_demo.myshopify.com', JSON.stringify({ size: 'XXL' }));
+    await load({ keepStorage: true });
+    expect(q('.ccf-sf-card-title').textContent).toBe('Not sure about your size?');
+  });
+
+  test('tries the settings call again once when the network fails', async () => {
+    jest.useFakeTimers();
+    try {
+      const p = load({ configFailures: 1 });
+      await Promise.resolve();
+      for (let i = 0; i < 5; i++) { jest.advanceTimersByTime(1600); await Promise.resolve(); await Promise.resolve(); }
+      jest.useRealTimers();
+      await p; await flush(); await flush();
+      expect(q('.ccf-sf-trigger')).not.toBeNull();
+    } finally { jest.useRealTimers(); }
   });
 });
