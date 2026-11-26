@@ -272,7 +272,7 @@ export default function SizeFinderScreen({ shop }) {
           className="sf-fit"
           style={{ transform: `scale(${fit.scale})`, width: `${100 / fit.scale}%` }}
         >
-          <SizeFinderPreview shop={shop} settings={settings} />
+          <SizeFinderPreview shop={shop} settings={settings} gender={gender} />
         </div>
       </aside>
       </div>

@@ -18,7 +18,8 @@ const SETTINGS = {
 beforeEach(() => {
   jest.clearAllMocks();
   apiGet.mockResolvedValue({ settings: JSON.parse(JSON.stringify(SETTINGS)) });
-  apiSend.mockImplementation((url, method, body) => Promise.resolve({ settings: body.settings }));
+  apiSend.mockImplementation((url, method, body) =>
+    Promise.resolve(url.endsWith('/preview') ? { size: 'M', reasons: [] } : { settings: body.settings }));
 });
 
 async function renderScreen() {
@@ -28,8 +29,9 @@ async function renderScreen() {
 
 async function saved() {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  await waitFor(() => expect(apiSend).toHaveBeenCalledTimes(1));
-  const [url, method, body] = apiSend.mock.calls[0];
+  // The preview also calls apiSend (POST …/preview); the save is the PUT.
+  await waitFor(() => expect(apiSend.mock.calls.some(([, m]) => m === 'PUT')).toBe(true));
+  const [url, method, body] = apiSend.mock.calls.find(([, m]) => m === 'PUT');
   expect(url).toBe(`/api/size-finder/${SHOP}/config`);
   expect(method).toBe('PUT');
   return body.settings;
@@ -79,7 +81,9 @@ describe('SizeFinder screen', () => {
   });
 
   it('shows the reason when saving fails', async () => {
-    apiSend.mockRejectedValue(new Error('Row 1: chest must be 40–200 cm'));
+    apiSend.mockImplementation((url) => (url.endsWith('/preview')
+      ? Promise.resolve({ size: 'M', reasons: [] })
+      : Promise.reject(new Error('Row 1: chest must be 40–200 cm'))));
     await renderScreen();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Row 1: chest must be 40–200 cm');
@@ -94,55 +98,56 @@ describe('SizeFinder screen', () => {
   });
 });
 
-describe('live preview', () => {
+describe('live preview (view only)', () => {
+  const previewCalls = () => apiSend.mock.calls.filter(([url]) => url.endsWith('/preview'));
 
-  it('uses the unsaved button text, sizes and chart, and asks the backend for the size', async () => {
+  it('works out the sample shopper size by itself and shows the unsaved button text', async () => {
     apiSend.mockImplementation((url, method, body) =>
       url.endsWith('/preview')
         ? Promise.resolve({ size: 'M', outOfRange: false, reasons: [{ area: 'chest', status: 'right' }, { area: 'length', status: 'info', value: 106 }] })
         : Promise.resolve({ settings: body.settings }));
     await renderScreen();
-    fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Which size?' } });
-    expect(screen.getByRole('button', { name: /Which size\?/ })).toBeInTheDocument();
-    expect(screen.getByLabelText('Example sizes')).toHaveTextContent('SM');
-
-    // The preview panel starts open, on step 1
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Relaxed' }));
-    fireEvent.click(screen.getByRole('button', { name: 'See my size' }));
-
     expect(await screen.findByLabelText('Recommended size')).toHaveTextContent('M');
-    const [url, method, body] = apiSend.mock.calls[0];
+    const [url, method, body] = previewCalls()[0];
     expect(url).toBe(`/api/size-finder/${SHOP}/preview`);
     expect(method).toBe('POST');
     expect(body.chart).toEqual(SETTINGS.charts.women);
-    expect(body.answers).toEqual({ gender: 'women', heightCm: 162, weightKg: 60, shape: 'average', fit: 'relaxed' });
+    expect(body.answers).toEqual({ gender: 'women', heightCm: 162, weightKg: 60, shape: 'average', fit: 'regular' });
     expect(screen.getByText('Garment length 106 cm')).toBeInTheDocument();
+    expect(screen.getByLabelText('Example sizes').querySelector('.on')).toHaveTextContent('M');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Select size M' }));
-    expect(screen.getByRole('button', { name: /Your size: M/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Which size?' } });
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('Which size?');
   });
 
-  it('editing the chart sends the new chart to the preview', async () => {
-    apiSend.mockResolvedValue({ size: 'S', reasons: [] });
+  it('nothing inside the store frame can be clicked or typed in', async () => {
     await renderScreen();
-    fireEvent.change(screen.getByLabelText('Row 1 Chest'), { target: { value: '88' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    fireEvent.click(screen.getByRole('button', { name: 'See my size' }));
     await screen.findByLabelText('Recommended size');
-    expect(apiSend.mock.calls[0][2].chart[0].chest).toBe(88);
+    const frame = screen.getByTestId('preview-frame');
+    expect(frame.querySelectorAll('button, input, select, textarea, a')).toHaveLength(0);
+    expect(frame.querySelector('.sfp-static')).toHaveAttribute('inert');
   });
 
-  it('height in feet, Women/Men choice, and an error from the backend', async () => {
+  it('editing the chart updates the preview result', async () => {
+    await renderScreen();
+    await screen.findByLabelText('Recommended size');
+    fireEvent.change(screen.getByLabelText('Row 1 Chest'), { target: { value: '88' } });
+    await waitFor(() => expect(previewCalls().at(-1)[2].chart[0].chest).toBe(88));
+  });
+
+  it('follows the chart editor: Men tab → men chart and men sample shopper', async () => {
+    await renderScreen();
+    await screen.findByLabelText('Recommended size');
+    fireEvent.click(screen.getByRole('button', { name: 'Men (1)' }));
+    await waitFor(() => expect(previewCalls().at(-1)[2].answers).toMatchObject({ gender: 'men', heightCm: 175, weightKg: 72 }));
+    expect(previewCalls().at(-1)[2].chart).toEqual(SETTINGS.charts.men);
+    expect(screen.getByText(/Sample shopper: Men/)).toBeInTheDocument();
+  });
+
+  it('shows the backend error in the result', async () => {
     apiSend.mockRejectedValue(new Error('This size chart is empty'));
     await renderScreen();
-    fireEvent.click(screen.getByRole('button', { name: 'ft' }));
-    expect(screen.getByText('5′ 4″')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Men' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    fireEvent.click(screen.getByRole('button', { name: 'See my size' }));
     expect(await screen.findByText('This size chart is empty')).toBeInTheDocument();
-    expect(apiSend.mock.calls[0][2].answers.gender).toBe('men');
   });
 
   it('both charts empty → explains shoppers will not see the button', async () => {
@@ -153,21 +158,27 @@ describe('live preview', () => {
 });
 
 describe('preview design', () => {
-  it('Desktop / Mobile switch, progress, option card hints, fit meter and close', async () => {
+  it('view tabs, Desktop / Mobile, progress, inches, fit meter', async () => {
     apiSend.mockResolvedValue({ size: 'M', reasons: [{ area: 'chest', status: 'snug' }] });
     const { container } = render(<SizeFinderScreen shop={SHOP} />);
     await screen.findByRole('switch', { name: 'Turn on Find my size' });
-    fireEvent.click(screen.getByRole('button', { name: 'Mobile' }));
-    expect(container.querySelector('.sfp-frame').className).toMatch(/is-mobile/);
-    expect(container.querySelectorAll('.sfp-progress span.on')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(screen.getByRole('button', { name: 'Broad' })).toHaveTextContent('BroadWider frame');
-    fireEvent.click(screen.getByRole('button', { name: 'See my size' }));
     await screen.findByLabelText('Recommended size');
     expect(container.querySelector('.sfp-meter-bar span').style.left).toBe('18%'); // chest "snug"
     expect(screen.getByText('A little snug')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(container.querySelector('.sfp-panel')).toBeNull();
+    expect(container.querySelectorAll('.sfp-progress span.on')).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mobile' }));
+    expect(container.querySelector('.sfp-frame').className).toMatch(/is-mobile/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Step 1' }));
+    expect(container.querySelectorAll('.sfp-progress span.on')).toHaveLength(1);
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('162 cm');
+    fireEvent.click(screen.getByRole('button', { name: 'in' }));
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('5′ 4″');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Step 2' }));
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('BroadWider frame');
+    expect(container.querySelector('.sfp-cards > span.on')).toHaveTextContent('Average');
   });
 });
 

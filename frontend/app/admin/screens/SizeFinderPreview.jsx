@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiSend } from '../../../lib/api';
 
 const CM_PER_IN = 2.54;
@@ -35,82 +35,92 @@ function Ruler() {
 }
 
 /**
- * Live preview of the storefront "Find my size" block, in a store-page frame, using the UNSAVED
- * settings on the page (button text and colour, charts, unit). Same design as ccf-size.js.
- * The size comes from the backend (POST /api/size-finder/:shop/preview) — the shoppers' maths.
+ * Live preview of the storefront "Find my size" block — DISPLAY ONLY. Nothing inside the store frame
+ * can be clicked or changed; it re-draws from the settings on the page (unsaved): button text and
+ * colour, unit, and the size chart for the Women/Men tab open in the chart editor.
+ * The result uses a sample shopper and the backend's maths (POST /api/size-finder/:shop/preview),
+ * fetched again ~0.4s after the chart changes. Same design as ccf-size.js.
+ * The view tabs (Step 1 / Step 2 / Result) and Desktop/Mobile only change what is shown.
  */
-export default function SizeFinderPreview({ shop, settings }) {
+export const SAMPLE_SHOPPER = {
+  women: { heightCm: 162, weightKg: 60 },
+  men: { heightCm: 175, weightKg: 72 },
+};
+const VIEWS = [[1, 'Step 1'], [2, 'Step 2'], [3, 'Result']];
+
+export default function SizeFinderPreview({ shop, settings, gender: editorGender }) {
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
+  const gender = genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
   const [device, setDevice] = useState('desktop');
-  const [open, setOpen] = useState(true);
-  const [step, setStep] = useState(1);
-  const [gender, setGender] = useState(genders[0] || 'women');
-  const [heightCm, setHeightCm] = useState(162);
-  const [weightKg, setWeightKg] = useState(60);
-  const [hUnit, setHUnit] = useState(settings.unit === 'in' ? 'ft' : 'cm');
-  const [wUnit, setWUnit] = useState('kg');
-  const [shape, setShape] = useState('average');
-  const [fit, setFit] = useState('regular');
-  const [remember, setRemember] = useState(false);
+  const [view, setView] = useState(3);
   const [result, setResult] = useState(null);
-  const [picked, setPicked] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showChart, setShowChart] = useState(false);
 
   const chart = settings.charts[gender] || [];
-  const chartKey = useMemo(() => JSON.stringify(settings.charts), [settings.charts]);
+  const chartKey = JSON.stringify(chart);
+  const sample = SAMPLE_SHOPPER[gender];
+  const hUnit = settings.unit === 'in' ? 'ft' : 'cm';
+  const wUnit = settings.unit === 'in' ? 'lb' : 'kg';
 
-  // A changed chart can change the answer: go back to the questions.
+  // Re-work the sample shopper's size whenever the chart (or Women/Men) changes.
   useEffect(() => {
-    setResult(null);
-    setPicked('');
-    setStep((s) => (s === 3 ? 2 : s));
-    if (!genders.includes(gender) && genders[0]) setGender(genders[0]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartKey]);
-
-  useEffect(() => { setHUnit(settings.unit === 'in' ? 'ft' : 'cm'); }, [settings.unit]);
-
-  async function seeSize() {
-    setBusy(true);
-    setError('');
-    try {
-      const d = await apiSend(`/api/size-finder/${shop}/preview`, 'POST', {
-        chart,
-        answers: { gender, heightCm: Math.round(heightCm), weightKg: Math.round(weightKg), shape, fit },
-      });
-      setResult(d);
-      setStep(3);
-    } catch (e) {
-      setError(e.message || 'Could not work out a size');
-    } finally {
-      setBusy(false);
+    if (!chart.length) {
+      setResult(null);
+      setError('');
+      setLoading(false);
+      return undefined;
     }
-  }
+    let cancelled = false;
+    setLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const d = await apiSend(`/api/size-finder/${shop}/preview`, 'POST', {
+          chart,
+          answers: { gender, heightCm: sample.heightCm, weightKg: sample.weightKg, shape: 'average', fit: 'regular' },
+        });
+        if (!cancelled) { setResult(d); setError(''); }
+      } catch (e) {
+        if (!cancelled) { setResult(null); setError(e.message || 'Could not work out a size'); }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shop, gender, chartKey]);
 
   const sizes = chart.length ? chart.map((r) => r.size) : ['S', 'M', 'L'];
+  const picked = view === 3 && result ? result.size : '';
   const lengthText = (v) => (hUnit === 'ft' ? `${Math.round((v / CM_PER_IN) * 10) / 10} in` : `${v} cm`);
+  const heightPct = ((sample.heightCm - 140) / (200 - 140)) * 100;
+  const weightPct = ((sample.weightKg - 40) / (130 - 40)) * 100;
 
   return (
     <section className="sfp" style={{ '--sfp-accent': accent, '--sfp-tint': `${accent}14` }} aria-label="Live preview">
       <style>{CSS}</style>
       <div className="sfp-top">
-        <p className="sfp-label">Live preview <span className="sfp-muted">· updates as you edit, before you save</span></p>
+        <p className="sfp-label">Live preview <span className="sfp-muted">· view only, updates as you edit</span></p>
         <div className="sfp-dev" role="group" aria-label="Preview size">
           {[['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([v, l]) => (
             <button key={v} type="button" aria-pressed={device === v} onClick={() => setDevice(v)}>{l}</button>
           ))}
         </div>
       </div>
+      <div className="sfp-views" role="group" aria-label="Preview screen">
+        {VIEWS.map(([v, l]) => (
+          <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{l}</button>
+        ))}
+      </div>
 
-      <div className={`sfp-frame ${device === 'mobile' ? 'is-mobile' : ''}`}>
+      <div className={`sfp-frame ${device === 'mobile' ? 'is-mobile' : ''}`} data-testid="preview-frame">
         <div className="sfp-bar" aria-hidden="true"><i /><i /><i /><span>yourstore.com/products/cotton-kurta</span></div>
-        <div className="sfp-page">
+        {/* Display only: inert = no clicks, no keyboard focus inside the store frame. */}
+        <div className="sfp-page sfp-static" {...{ inert: '' }}>
           <div className="sfp-product">
             <div className="sfp-photo" aria-hidden="true">
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 6a2 2 0 1 1 2-2" /><path d="M12 6v1.5L3 14a1.5 1.5 0 0 0 .9 2.7h16.2A1.5 1.5 0 0 0 21 14l-9-6.5" /></svg>
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#8A8A8A" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 6a2 2 0 1 1 2-2" /><path d="M12 6v1.5L3 14a1.5 1.5 0 0 0 .9 2.7h16.2A1.5 1.5 0 0 0 21 14l-9-6.5" /></svg>
             </div>
             <div className="sfp-title-block">
               <p className="sfp-name">Cotton Kurta</p>
@@ -120,93 +130,74 @@ export default function SizeFinderPreview({ shop, settings }) {
               {sizes.map((s) => <span key={s} className={picked === s ? 'on' : ''}>{s}</span>)}
             </div>
           </div>
-          <div className="sfp-info">
 
-            {!genders.length ? (
-              <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the button.</p>
-            ) : (
-              <>
-                <div className="sfp-trigger">
-                  <button type="button" className="sfp-open" aria-expanded={open} onClick={() => { setOpen((o) => !o); if (result) setStep(3); }}>
-                    <Ruler />{picked ? `Your size: ${picked}` : (settings.buttonText || 'Find my size')}
-                  </button>
-                  <span className="sfp-hint">Takes 20 seconds</span>
+          {!genders.length ? (
+            <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the button.</p>
+          ) : (
+            <div className="sfp-info">
+              <div className="sfp-trigger">
+                <span className="sfp-open"><Ruler />{settings.buttonText || 'Find my size'}</span>
+                <span className="sfp-hint">Takes 20 seconds</span>
+              </div>
+
+              <div className="sfp-panel">
+                <div className="sfp-head">
+                  <div>
+                    <p className="sfp-step">Step {view} of 3</p>
+                    <p className="sfp-title">{TITLES[view]}</p>
+                  </div>
+                  <span className="sfp-close" aria-hidden="true">×</span>
                 </div>
-
-                {open && (
-                  <div className="sfp-panel">
-                    <div className="sfp-head">
-                      <div>
-                        <p className="sfp-step">Step {step} of 3</p>
-                        <p className="sfp-title">{TITLES[step]}</p>
+                <div className="sfp-progress" aria-hidden="true">{[1, 2, 3].map((i) => <span key={i} className={i <= view ? 'on' : ''} />)}</div>
+                <div className="sfp-body">
+                  {view === 1 && (
+                    <>
+                      {genders.length > 1 && (
+                        <div className="sfp-seg">
+                          {genders.map((g) => <span key={g} className={gender === g ? 'on' : ''}>{g === 'men' ? 'Men' : 'Women'}</span>)}
+                        </div>
+                      )}
+                      <div className="sfp-fields">
+                        <div className="sfp-field">
+                          <div className="sfp-flabel"><span>Height</span><span className="sfp-unit"><span className={hUnit === 'cm' ? 'on' : ''}>cm</span><span className={hUnit === 'ft' ? 'on' : ''}>ft</span></span></div>
+                          <div className="sfp-value">{heightLabel(sample.heightCm, hUnit)}</div>
+                          <div className="sfp-track"><span style={{ width: `${heightPct}%` }} /><i style={{ left: `${heightPct}%` }} /></div>
+                          <div className="sfp-scale"><span>{hUnit === 'cm' ? '140 cm' : '4′ 7″'}</span><span>{hUnit === 'cm' ? '200 cm' : '6′ 7″'}</span></div>
+                        </div>
+                        <div className="sfp-field">
+                          <div className="sfp-flabel"><span>Weight</span><span className="sfp-unit"><span className={wUnit === 'kg' ? 'on' : ''}>kg</span><span className={wUnit === 'lb' ? 'on' : ''}>lb</span></span></div>
+                          <div className="sfp-value">{weightLabel(sample.weightKg, wUnit)}</div>
+                          <div className="sfp-track"><span style={{ width: `${weightPct}%` }} /><i style={{ left: `${weightPct}%` }} /></div>
+                          <div className="sfp-scale"><span>{wUnit === 'kg' ? '40 kg' : '88 lb'}</span><span>{wUnit === 'kg' ? '130 kg' : '287 lb'}</span></div>
+                        </div>
                       </div>
-                      <button type="button" className="sfp-close" aria-label="Close" onClick={() => setOpen(false)}>×</button>
-                    </div>
-                    <div className="sfp-progress" aria-hidden="true">{[1, 2, 3].map((i) => <span key={i} className={i <= step ? 'on' : ''} />)}</div>
-                    <div className="sfp-body">
-                      {step === 1 && (
-                        <>
-                          {genders.length > 1 && (
-                            <div className="sfp-seg" role="group" aria-label="Women or men">
-                              {genders.map((g) => (
-                                <button key={g} type="button" aria-pressed={gender === g} onClick={() => setGender(g)}>{g === 'men' ? 'Men' : 'Women'}</button>
-                              ))}
-                            </div>
-                          )}
-                          <div className="sfp-fields">
-                          <div className="sfp-field">
-                            <div className="sfp-flabel">
-                              <span>Height</span>
-                              <span className="sfp-unit" role="group" aria-label="Height unit">
-                                {['cm', 'ft'].map((u) => <button key={u} type="button" aria-pressed={hUnit === u} onClick={() => setHUnit(u)}>{u}</button>)}
-                              </span>
-                            </div>
-                            <div className="sfp-value">{heightLabel(heightCm, hUnit)}</div>
-                            <input type="range" min={140} max={200} step={1} value={heightCm} onChange={(e) => setHeightCm(Number(e.target.value))} aria-label="Preview height" />
-                            <div className="sfp-scale"><span>{hUnit === 'cm' ? '140 cm' : '4′ 7″'}</span><span>{hUnit === 'cm' ? '200 cm' : '6′ 7″'}</span></div>
-                          </div>
-                          <div className="sfp-field">
-                            <div className="sfp-flabel">
-                              <span>Weight</span>
-                              <span className="sfp-unit" role="group" aria-label="Weight unit">
-                                {['kg', 'lb'].map((u) => <button key={u} type="button" aria-pressed={wUnit === u} onClick={() => setWUnit(u)}>{u}</button>)}
-                              </span>
-                            </div>
-                            <div className="sfp-value">{weightLabel(weightKg, wUnit)}</div>
-                            <input type="range" min={40} max={130} step={1} value={weightKg} onChange={(e) => setWeightKg(Number(e.target.value))} aria-label="Preview weight" />
-                            <div className="sfp-scale"><span>{wUnit === 'kg' ? '40 kg' : '88 lb'}</span><span>{wUnit === 'kg' ? '130 kg' : '287 lb'}</span></div>
-                          </div>
-                          </div>
-                          <div className="sfp-actions"><button type="button" className="sfp-main" onClick={() => setStep(2)}>Continue</button></div>
-                        </>
-                      )}
+                      <div className="sfp-actions"><span className="sfp-main">Continue</span></div>
+                    </>
+                  )}
 
-                      {step === 2 && (
-                        <>
-                          <p className="sfp-q">Your body shape</p>
-                          <div className="sfp-cards">
-                            {SHAPES.map(([v, l, h]) => (
-                              <button key={v} type="button" aria-label={l} aria-pressed={shape === v} onClick={() => setShape(v)}><b>{l}</b><small>{h}</small></button>
-                            ))}
-                          </div>
-                          <p className="sfp-q">How do you like it to fit?</p>
-                          <div className="sfp-cards">
-                            {FITS.map(([v, l, h]) => (
-                              <button key={v} type="button" aria-label={l} aria-pressed={fit === v} onClick={() => setFit(v)}><b>{l}</b><small>{h}</small></button>
-                            ))}
-                          </div>
-                          <label className="sfp-check">
-                            <span><b>Remember my size</b><small>We save only the size, never your height or weight.</small></span>
-                            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} aria-label="Remember my size" />
-                          </label>
-                          <div className="sfp-actions">
-                            <button type="button" className="sfp-ghost" onClick={() => setStep(1)}>Back</button>
-                            <button type="button" className="sfp-main" onClick={seeSize} disabled={busy}>{busy ? 'Working it out…' : 'See my size'}</button>
-                          </div>
-                        </>
-                      )}
+                  {view === 2 && (
+                    <>
+                      <p className="sfp-q">Your body shape</p>
+                      <div className="sfp-cards">
+                        {SHAPES.map(([v, l, h]) => <span key={v} className={v === 'average' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
+                      </div>
+                      <p className="sfp-q">How do you like it to fit?</p>
+                      <div className="sfp-cards">
+                        {FITS.map(([v, l, h]) => <span key={v} className={v === 'regular' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
+                      </div>
+                      <div className="sfp-check">
+                        <span><b>Remember my size</b><small>We save only the size, never your height or weight.</small></span>
+                        <i className="sfp-switch" aria-hidden="true" />
+                      </div>
+                      <div className="sfp-actions"><span className="sfp-ghost">Back</span><span className="sfp-main">See my size</span></div>
+                    </>
+                  )}
 
-                      {step === 3 && result && (
+                  {view === 3 && (
+                    <>
+                      {error && <p className="sfp-err" role="alert">{error}</p>}
+                      {!error && !result && <p className="sfp-muted sfp-loading">{loading ? 'Working out the size…' : 'Add sizes to this chart to see a result.'}</p>}
+                      {!error && result && (
                         <div className="sfp-result">
                           <div className="sfp-result-top">
                             <div className="sfp-size" aria-label="Recommended size">{result.size}</div>
@@ -227,37 +218,21 @@ export default function SizeFinderPreview({ shop, settings }) {
                                 : <span className={x.status === 'right' ? 'sfp-ok' : 'sfp-bad'}>{REASON_TEXT[x.status]}</span>}
                             </div>
                           ))}
-                          <button type="button" className="sfp-link" onClick={() => setShowChart((v) => !v)}>{showChart ? 'Hide size chart' : 'View size chart'}</button>
-                          {showChart && (
-                            <table className="sfp-table">
-                              <thead><tr><th>Size</th><th>Chest</th><th>Waist</th><th>Length</th></tr></thead>
-                              <tbody>
-                                {chart.map((r) => (
-                                  <tr key={r.size}>
-                                    <td>{r.size}</td>
-                                    {[r.chest, r.waist, r.length].map((n, i) => <td key={i}>{!Number(n) ? '—' : hUnit === 'ft' ? Math.round((n / CM_PER_IN) * 10) / 10 : n}</td>)}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                          <div className="sfp-actions">
-                            <button type="button" className="sfp-ghost" onClick={() => { setStep(1); setResult(null); }}>Back</button>
-                            <button type="button" className="sfp-main" onClick={() => { setPicked(result.size); setOpen(false); }}>Select size {result.size}</button>
-                          </div>
-                          <p className="sfp-note">A guide based on your answers and this store&apos;s size chart.</p>
+                          <span className="sfp-link">View size chart</span>
+                          <div className="sfp-actions"><span className="sfp-ghost">Back</span><span className="sfp-main">Select size {result.size}</span></div>
                         </div>
                       )}
-
-                      {error && <p className="sfp-err" role="alert">{error}</p>}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+      <p className="sfp-sample">
+        Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, average shape, regular fit.
+      </p>
     </section>
   );
 }
@@ -305,31 +280,31 @@ const CSS = `
 .sfp-progress span.on{background:var(--sfp-accent)}
 .sfp-body{padding:14px 18px 16px}
 .sfp-seg{display:flex;background:#F3F4F6;border-radius:10px;padding:4px;gap:4px;margin:0 0 12px}
-.sfp-seg button{flex:1;border:0;background:transparent;border-radius:8px;padding:8px;font-size:14px;font-weight:500;color:#616161;cursor:pointer}
-.sfp-seg button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 3px rgba(17,24,39,.12)}
+.sfp-seg > span{flex:1;border:0;background:transparent;border-radius:8px;padding:8px;font-size:14px;font-weight:500;color:#616161;cursor:pointer}
+.sfp-seg > span.on{background:#fff;color:#303030;box-shadow:0 1px 3px rgba(17,24,39,.12)}
 .sfp-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .sfp-field{margin:0 0 12px;min-width:0}
 .sfp-flabel{display:flex;justify-content:space-between;align-items:center;margin:0 0 6px}
 .sfp-flabel > span:first-child{font-size:13px;font-weight:500;color:#4A4A4A}
 .sfp-unit{display:inline-flex;background:#F3F4F6;border-radius:8px;padding:2px}
-.sfp-unit button{border:0;background:transparent;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:500;color:#616161;cursor:pointer}
-.sfp-unit button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 2px rgba(17,24,39,.12)}
+.sfp-unit > span{border:0;background:transparent;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:500;color:#616161;cursor:pointer}
+.sfp-unit > span.on{background:#fff;color:#303030;box-shadow:0 1px 2px rgba(17,24,39,.12)}
 .sfp-value{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0 0 2px}
-.sfp-field input[type=range]{width:100%;accent-color:var(--sfp-accent);margin:0}
+.sfp-track{position:relative;height:4px;border-radius:4px;background:#E3E3E3;margin:8px 0 6px}
+.sfp-track > span{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--sfp-accent)}
+.sfp-track > i{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--sfp-accent)}
 .sfp-scale{display:flex;justify-content:space-between;font-size:11px;color:#8A8A8A;margin-top:2px}
 .sfp-q{font-size:13px;font-weight:500;color:#4A4A4A;margin:0 0 6px}
 .sfp-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 12px}
-.sfp-cards button{border:1.5px solid #E5E7EB;background:#fff;border-radius:12px;padding:8px 6px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:center}
+.sfp-cards > span{border:1.5px solid #E5E7EB;background:#fff;border-radius:12px;padding:8px 6px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:center}
 .sfp-cards b{font-size:14px;font-weight:500;color:#303030}
 .sfp-cards small{font-size:11px;color:#616161}
-.sfp-cards button[aria-pressed="true"]{border-color:var(--sfp-accent);background:var(--sfp-tint)}
+.sfp-cards > span.on{border-color:var(--sfp-accent);background:var(--sfp-tint)}
 .sfp-check{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F9FAFB;border-radius:12px;padding:9px 12px;cursor:pointer}
 .sfp-check b{display:block;font-size:13px}
 .sfp-check small{font-size:12px;color:#616161}
-.sfp-check input{appearance:none;-webkit-appearance:none;width:40px;height:22px;border-radius:999px;background:#D1D5DB;position:relative;cursor:pointer;flex-shrink:0;margin:0}
-.sfp-check input::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:left .15s}
-.sfp-check input:checked{background:var(--sfp-accent)}
-.sfp-check input:checked::after{left:20px}
+.sfp-switch{display:inline-block;appearance:none;-webkit-appearance:none;width:40px;height:22px;border-radius:999px;background:#D1D5DB;position:relative;cursor:pointer;flex-shrink:0;margin:0}
+.sfp-switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:left .15s}
 .sfp-actions{display:flex;gap:10px;margin-top:14px}
 .sfp-main{flex:2;background:var(--sfp-accent);border:1px solid var(--sfp-accent);color:#fff;border-radius:10px;padding:10px;font-size:14px;font-weight:500;cursor:pointer}
 .sfp-main[disabled]{opacity:.7}
@@ -356,4 +331,12 @@ const CSS = `
 .sfp-table th,.sfp-table td{border-bottom:1px solid #F3F4F6;padding:6px;text-align:center}
 .sfp-note{font-size:12px;color:#616161;margin:10px 0 0}
 .sfp-err{font-size:13px;color:#B42318;font-weight:500;margin:12px 0 0;background:#FEF2F2;border-radius:8px;padding:8px 10px}
+.sfp-views{display:inline-flex;background:#F1F1F1;border-radius:8px;padding:3px;margin:0 0 10px}
+.sfp-views button{border:0;background:transparent;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;color:#616161;cursor:pointer}
+.sfp-views button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.sfp-static{pointer-events:none;user-select:none}
+.sfp-open,.sfp-close,.sfp-main,.sfp-ghost,.sfp-link{display:inline-flex;align-items:center;justify-content:center}
+.sfp-actions .sfp-main,.sfp-actions .sfp-ghost{display:flex}
+.sfp-loading{padding:18px 0;text-align:center}
+.sfp-sample{font-size:12px;color:#8A8A8A;margin:10px 2px 0}
 `;
