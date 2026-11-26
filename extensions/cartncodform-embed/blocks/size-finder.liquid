@@ -21,6 +21,9 @@
   data-tags="{{ product.tags | join: '|' | escape }}"
   data-size-option="{{ size_name | escape }}"
   data-size-values="{{ size_values | escape }}"
+  data-product-title="{{ product.title | escape }}"
+  data-product-price="{{ product.selected_or_first_available_variant.price | money | strip_html | escape }}"
+  {%- if product.featured_image %} data-product-image="{{ product.featured_image | image_url: width: 120 }}"{% endif %}
   data-design-mode="{{ request.design_mode }}"
 ></div>
 <script src="{{ 'ccf-size.js' | asset_url }}" defer></script>

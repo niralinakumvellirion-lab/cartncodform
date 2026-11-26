@@ -127,7 +127,11 @@ export default function SizeFinderScreen({ shop }) {
       <div style={ui.head}>
         <div>
           <h1 style={ui.h1}>Find my size</h1>
-          <p style={ui.muted}>Shoppers enter height, weight, body shape and fit, and get a size from your chart.</p>
+          <p style={{ ...ui.muted, margin: '0 0 10px' }}>A size advisor on your product pages: shoppers enter height, weight and fit, and get the right size from your chart.</p>
+          <span style={{ ...ui.pill, ...(settings.enabled ? ui.pillOn : ui.pillOff) }}>
+            <span style={{ ...ui.dot, background: settings.enabled ? '#047857' : '#B45309' }} />
+            {settings.enabled ? 'Showing on your store' : 'Hidden — turn on and save to show it'}
+          </span>
         </div>
         <span style={ui.switchWrap}>
           <span aria-hidden="true" style={{ ...ui.switchText, color: settings.enabled ? '#065F46' : '#B45309' }}>
@@ -146,8 +150,7 @@ export default function SizeFinderScreen({ shop }) {
         </span>
       </div>
       <section style={ui.card}>
-        <p style={ui.label}>Where it shows</p>
-        <p style={ui.muted}>On products that have a Size option.</p>
+        <SectionHead icon="pin" title="Where it shows" text="Every product that has a Size option. Add a tag to show it only on some products." />
         <label style={ui.field}>Only on products with this tag (optional)
           <input
             type="text"
@@ -162,8 +165,7 @@ export default function SizeFinderScreen({ shop }) {
       </section>
 
       <section style={ui.card} aria-label="Card on the product page">
-        <p style={ui.label}>Card on the product page</p>
-        <p style={ui.muted}>Shoppers see this card right under the Size buttons. Change the words and colour here — the preview on the right updates as you type.</p>
+        <SectionHead icon="card" title="Card on the product page" text="Shoppers see this card right under the Size buttons. The preview updates as you type." />
         <label style={ui.field}>Heading
           <input
             type="text"
@@ -251,7 +253,7 @@ export default function SizeFinderScreen({ shop }) {
 
       <section style={ui.card} aria-label="Size charts">
         <div style={ui.row}>
-          <p style={{ ...ui.label, margin: 0 }}>Size charts</p>
+          <SectionHead icon="chart" title="Size charts" text="Body measurements for each size." />
           <span style={ui.seg} role="group" aria-label="Unit">
             {['cm', 'in'].map((u) => (
               <button key={u} type="button" aria-pressed={unit === u} onClick={() => set({ unit: u })} style={unit === u ? ui.segOn : ui.segOff}>
@@ -260,9 +262,9 @@ export default function SizeFinderScreen({ shop }) {
             ))}
           </span>
         </div>
-        <p style={ui.muted}>
-          Body measurements for each size. Starter Indian charts are filled in; change them to match your clothes.
-          Leave a chart empty to hide that option from shoppers.
+        <p style={ui.tip}>
+          Starter Indian charts are filled in — change them to match your clothes. Leave a chart empty to hide
+          Womenswear or Menswear from shoppers.
         </p>
         <div style={ui.row} role="group" aria-label="Chart">
           {[{ v: 'women', l: 'Women' }, { v: 'men', l: 'Men' }].map((g) => (
@@ -319,7 +321,7 @@ export default function SizeFinderScreen({ shop }) {
         whenLive="Shoppers see the button once Find my size is turned on and saved."
       />
 
-      <div style={ui.row}>
+      <div className="sf-savebar" style={ui.row}>
         <button type="button" onClick={save} disabled={saving} style={ui.save}>{saving ? 'Saving…' : 'Save'}</button>
         {message && <span style={ui.ok}>✓ {message}</span>}
         {error && <span style={ui.error} role="alert">{error}</span>}
@@ -339,6 +341,25 @@ export default function SizeFinderScreen({ shop }) {
   );
 }
 
+const ICONS = {
+  pin: <path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
+  card: <><rect x="3" y="6" width="18" height="12" rx="3" /><path d="M7 12h6M16 12h1" /></>,
+  chart: <path d="M3 15.5 15.5 3 21 8.5 8.5 21zM7 12l2 2M10 9l2 2M13 6l2 2" />,
+};
+function SectionHead({ icon, title, text }) {
+  return (
+    <div style={ui.sectionHead}>
+      <span style={ui.sectionIcon} aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{ICONS[icon]}</svg>
+      </span>
+      <span>
+        <span style={ui.sectionTitle}>{title}</span>
+        <span style={ui.sectionText}>{text}</span>
+      </span>
+    </div>
+  );
+}
+
 // Settings on the left, live preview pinned on the right; stacked on narrow screens.
 const LAYOUT_CSS = `
 .sf-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:20px;align-items:start}
@@ -346,6 +367,10 @@ const LAYOUT_CSS = `
 .sf-main{display:flex;flex-direction:column;gap:16px;min-width:0;padding-bottom:40px}
 .sf-side{position:sticky;top:16px;min-width:0;overflow:visible}
 .sf-fit{transform-origin:top left}
+.sf-main input[type=text],.sf-main input[type=number]{transition:border-color .15s,box-shadow .15s}
+.sf-main input[type=text]:focus,.sf-main input[type=number]:focus{outline:none;border-color:#303030;box-shadow:0 0 0 3px rgba(48,48,48,.12)}
+.sf-main tbody tr:hover td{background:#FAFAFA}
+.sf-savebar{position:sticky;bottom:0;z-index:2;background:rgba(246,246,247,.92);backdrop-filter:blur(6px);padding:12px 0;margin:0!important;border-top:1px solid #E3E3E3}
 @media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static;height:auto!important}.sf-fit{transform:none!important;width:100%!important}}
 `;
 
@@ -363,25 +388,34 @@ const ui = {
   page: { fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif", WebkitFontSmoothing: 'antialiased', color: '#303030', maxWidth: 1280, margin: '0 auto', padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 },
   head: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 },
   h1: { fontSize: 20, fontWeight: 550, margin: '0 0 4px', color: '#303030' },
-  card: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 20 },
+  card: { background: '#fff', border: '1px solid #E3E3E3', borderRadius: 12, padding: 20, boxShadow: '0 1px 2px rgba(0,0,0,.04)' },
   label: { fontWeight: 550, fontSize: 14, color: '#4A4A4A', margin: '0 0 6px' },
   muted: { fontSize: 13, color: '#616161', margin: '4px 0 12px' },
-  field: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: '#4A4A4A', fontWeight: 500, marginBottom: 14 },
-  input: { padding: '6px 8px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 14, maxWidth: 360 },
+  field: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: '#303030', fontWeight: 500, marginBottom: 16 },
+  input: { height: 36, padding: '0 10px', border: '1px solid #D4D4D4', borderRadius: 8, fontSize: 14, width: '100%', maxWidth: 420, background: '#fff', color: '#303030' },
   color: { width: 36, height: 36, border: '1px solid #D1D5DB', borderRadius: 6, padding: 2 },
   row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 },
   seg: { display: 'inline-flex', gap: 4, marginLeft: 'auto' },
-  segOn: { background: '#303030', color: '#fff', border: '1px solid #303030', borderRadius: 6, padding: '5px 12px', fontSize: 13, cursor: 'pointer' },
-  segOff: { background: '#fff', color: '#303030', border: '1px solid #D1D5DB', borderRadius: 6, padding: '5px 12px', fontSize: 13, cursor: 'pointer' },
+  segOn: { background: '#303030', color: '#fff', border: '1px solid #303030', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer' },
+  segOff: { background: '#fff', color: '#303030', border: '1px solid #D4D4D4', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer' },
   table: { width: '100%', borderCollapse: 'collapse', marginBottom: 8 },
-  th: { textAlign: 'left', padding: '6px 6px', fontSize: 12, color: '#616161', fontWeight: 500, borderBottom: '1px solid #E5E7EB' },
+  th: { textAlign: 'left', padding: '8px 6px', fontSize: 11, color: '#616161', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid #E3E3E3' },
   td: { padding: '6px' },
-  cell: { width: '100%', maxWidth: 110, padding: '5px 6px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 14 },
+  cell: { width: '100%', maxWidth: 110, height: 34, padding: '0 8px', border: '1px solid #D4D4D4', borderRadius: 8, fontSize: 14 },
   remove: { background: 'none', border: 'none', color: '#8A8A8A', cursor: 'pointer', fontSize: 14 },
-  add: { background: 'none', border: 'none', color: '#4F46E5', cursor: 'pointer', fontSize: 13, fontWeight: 500, padding: '4px 0' },
-  save: { background: '#4F46E5', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 20px', fontWeight: 550, fontSize: 14, cursor: 'pointer' },
+  add: { background: '#fff', border: '1px dashed #C9C9C9', borderRadius: 8, color: '#303030', cursor: 'pointer', fontSize: 13, fontWeight: 500, padding: '8px 14px', marginTop: 4 },
+  save: { background: '#303030', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 1px 0 rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.12)' },
   ok: { fontSize: 13, color: '#059669' },
   error: { fontSize: 13, color: '#DC2626' },
+  pill: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 500, borderRadius: 999, padding: '3px 10px' },
+  pillOn: { background: '#ECFDF5', color: '#065F46' },
+  pillOff: { background: '#FFF7ED', color: '#9A3412' },
+  dot: { width: 7, height: 7, borderRadius: '50%' },
+  sectionHead: { display: 'flex', gap: 12, alignItems: 'flex-start', margin: '0 0 16px', flex: 1, minWidth: 0 },
+  sectionIcon: { width: 34, height: 34, borderRadius: 10, background: '#F1F1F1', color: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  sectionTitle: { display: 'block', fontSize: 15, fontWeight: 600, color: '#303030' },
+  sectionText: { display: 'block', fontSize: 13, color: '#616161', marginTop: 2 },
+  tip: { fontSize: 12.5, color: '#616161', background: '#F7F7F7', borderRadius: 8, padding: '8px 12px', margin: '0 0 14px' },
   switchWrap: { display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 },
   switchText: { fontSize: 13, fontWeight: 600 },
   toggle: { position: 'relative', display: 'inline-flex', alignItems: 'center', width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer' },

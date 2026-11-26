@@ -2,7 +2,8 @@
    Classes prefixed .ccf-sf-*. Settings + charts from the App Proxy; the size itself is worked out
    on the backend (POST /apps/cartncodform/size-finder/recommend). Height and weight stay on this
    device (localStorage, to pre-fill next time) and are sent only for the calculation.
-   The admin's live preview (frontend/app/admin/screens/SizeFinderPreview.jsx) mirrors this design. */
+   Opens as a "size advisor" drawer (desktop) or bottom sheet (phone), with a live estimate while the
+   shopper moves the sliders. The admin's live preview (SizeFinderPreview.jsx) mirrors this design. */
 (function () {
   'use strict';
 
@@ -27,105 +28,150 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
     try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
   }
 
+  // Editorial "size advisor" look: warm neutrals, thin rules, uppercase labels, one accent colour.
+  // Desktop: a drawer from the right. Phones (≤640px): a bottom sheet.
   function injectStyles(accent) {
     if (document.getElementById('ccf-sf-styles')) return;
     var tint = accent + '14';
     var s = document.createElement('style');
     s.id = 'ccf-sf-styles';
     s.textContent = [
-      '.ccf-sf *{box-sizing:border-box}',
-      '.ccf-sf{margin:14px 0;font-family:inherit;color:#303030;line-height:1.45;-webkit-font-smoothing:antialiased}',
-      '.ccf-sf button{font-family:inherit;letter-spacing:normal;text-transform:none;min-height:0}',
-      // trigger
-      '.ccf-sf-trigger{width:100%;display:flex;align-items:center;gap:12px;padding:12px 14px;margin:0;border:1px solid ' + accent + '40;border-radius:14px;background:linear-gradient(135deg,' + accent + '0F,' + accent + '05);color:#303030;cursor:pointer;text-align:left;transition:border-color .15s,box-shadow .15s,transform .15s}',
+      '.ccf-sf *,.ccf-sf-overlay *,.ccf-sf-panel *{box-sizing:border-box}',
+      '.ccf-sf{margin:14px 0;font-family:inherit;color:#1A1A1A;line-height:1.45;-webkit-font-smoothing:antialiased}',
+      '.ccf-sf button,.ccf-sf-panel button{font-family:inherit;letter-spacing:normal;text-transform:none;min-height:0;margin:0}',
+      // trigger card
+      '.ccf-sf-trigger{width:100%;display:flex;align-items:center;gap:12px;padding:12px 14px;margin:0;border:1px solid ' + accent + '40;border-radius:14px;background:linear-gradient(135deg,' + accent + '0F,' + accent + '05);color:#1A1A1A;cursor:pointer;text-align:left;transition:border-color .15s,box-shadow .15s,transform .15s}',
       '.ccf-sf-trigger:hover{border-color:' + accent + ';box-shadow:0 6px 18px rgba(17,24,39,.08);transform:translateY(-1px)}',
       '.ccf-sf-trigger:focus-visible{outline:2px solid ' + accent + ';outline-offset:2px}',
       '.ccf-sf-icon{position:relative;width:42px;height:42px;border-radius:50%;background:#fff;color:' + accent + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px ' + accent + '33}',
       '.ccf-sf-icon::after{content:"";position:absolute;inset:-1px;border-radius:50%;border:2px solid ' + accent + ';opacity:0;animation:ccf-sf-pulse 2.2s ease-out 1s 3}',
       '@keyframes ccf-sf-pulse{0%{transform:scale(1);opacity:.45}100%{transform:scale(1.45);opacity:0}}',
-      '@media (prefers-reduced-motion:reduce){.ccf-sf-icon::after{animation:none}.ccf-sf-trigger{transition:none}}',
       '.ccf-sf-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
       '.ccf-sf-card-title{font-size:15px;font-weight:600;line-height:1.3}',
-      '.ccf-sf-card-sub{font-size:12.5px;color:#616161;line-height:1.35}',
+      '.ccf-sf-card-sub{font-size:12.5px;color:#6B6B6B;line-height:1.35}',
       '.ccf-sf-cta{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;background:' + accent + ';color:#fff;border:1px solid ' + accent + ';border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}',
-      '.ccf-sf-trigger.is-done .ccf-sf-icon{background:' + accent + ';color:#fff}',
-      '.ccf-sf-trigger.is-done .ccf-sf-icon::after{display:none}',
       '.ccf-sf-cta.is-outline{background:#fff;color:' + accent + '}',
       '.ccf-sf-cta.is-soft{background:' + accent + '1F;border-color:transparent;color:' + accent + '}',
+      '.ccf-sf-trigger.is-done .ccf-sf-icon{background:' + accent + ';color:#fff}',
+      '.ccf-sf-trigger.is-done .ccf-sf-icon::after{display:none}',
       '.ccf-sf-trigger.is-done .ccf-sf-cta{background:#fff;border-color:' + accent + ';color:' + accent + '}',
       '@media (max-width:420px){.ccf-sf-trigger{padding:11px 12px;gap:10px}.ccf-sf-icon{width:38px;height:38px}.ccf-sf-card-title{font-size:14px}.ccf-sf-cta{padding:7px 11px;font-size:12px}}',
-      // panel
-      '.ccf-sf-panel{margin-top:12px;border:1px solid #E5E7EB;border-radius:16px;background:#fff;box-shadow:0 10px 30px rgba(17,24,39,.08);overflow:hidden}',
-      '.ccf-sf-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 20px 0}',
-      '.ccf-sf-step{font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#616161;margin:0 0 4px}',
-      '.ccf-sf-title{font-size:18px;font-weight:600;margin:0}',
-      '.ccf-sf-close{background:#F3F4F6;border:0;width:30px;height:30px;border-radius:50%;cursor:pointer;color:#4A4A4A;font-size:16px;line-height:30px;text-align:center;flex-shrink:0}',
-      '.ccf-sf-progress{display:flex;gap:6px;padding:14px 20px 0}',
-      '.ccf-sf-progress span{flex:1;height:4px;border-radius:4px;background:#E5E7EB}',
-      '.ccf-sf-progress span.on{background:' + accent + '}',
-      '.ccf-sf-body{padding:18px 20px 20px}',
-      // segmented
-      '.ccf-sf-seg{display:flex;background:#F3F4F6;border-radius:10px;padding:4px;gap:4px;margin:0 0 18px}',
-      '.ccf-sf-seg button{flex:1;border:0;background:transparent;border-radius:8px;padding:8px;font-size:14px;font-weight:500;color:#616161;cursor:pointer}',
-      '.ccf-sf-seg button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 3px rgba(17,24,39,.12)}',
-      // measure fields
-      '.ccf-sf-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}',
+
+      // drawer + backdrop
+      '.ccf-sf-overlay{position:fixed;inset:0;background:rgba(20,20,20,.38);z-index:2147483000;opacity:0;transition:opacity .25s}',
+      '.ccf-sf-overlay.is-open{opacity:1}',
+      // themes like Dawn hide empty divs (div:empty{display:none}); these two are empty on purpose
+      '.ccf-sf-overlay.ccf-sf-overlay{display:block}',
+      '.ccf-sf-overlay.ccf-sf-overlay[hidden]{display:none}',
+      '.ccf-sf-panel{position:fixed;top:0;right:0;bottom:0;width:min(440px,100vw);z-index:2147483001;background:#fff;color:#1A1A1A;display:flex;flex-direction:column;font-size:14px;line-height:1.45;box-shadow:-12px 0 40px rgba(0,0,0,.14);transform:translateX(100%);transition:transform .3s cubic-bezier(.2,.8,.2,1);-webkit-font-smoothing:antialiased}',
+      '.ccf-sf-panel.is-open{transform:none}',
+      '.ccf-sf-panel[hidden]{display:none}',
+      '.ccf-sf-grab{display:none}',
+      '@media (max-width:640px){.ccf-sf-panel{top:auto;left:0;width:100%;max-height:92vh;border-radius:18px 18px 0 0;transform:translateY(100%);box-shadow:0 -12px 40px rgba(0,0,0,.18)}.ccf-sf-panel .ccf-sf-grab{display:block;width:40px;height:4px;border-radius:4px;background:#D9D6D0;margin:8px auto 0}}',
+      '@media (prefers-reduced-motion:reduce){.ccf-sf-panel,.ccf-sf-overlay,.ccf-sf-trigger{transition:none}.ccf-sf-icon::after{animation:none}}',
+      '.ccf-sf-top{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid #EEECE8}',
+      '.ccf-sf-brand{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#1A1A1A;margin:0}',
+      '.ccf-sf-close{background:none;border:0;width:32px;height:32px;border-radius:50%;cursor:pointer;color:#1A1A1A;font-size:22px;line-height:32px;text-align:center;padding:0}',
+      '.ccf-sf-close:hover{background:#F4F3F0}',
+      '.ccf-sf-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 22px}',
+      // product strip
+      '.ccf-sf-product{display:flex;align-items:center;gap:12px;background:#F7F6F3;border-radius:6px;padding:10px;margin:16px 0 0}',
+      '.ccf-sf-thumb{width:44px;height:44px;border-radius:4px;background:#E9E7E2;object-fit:cover;flex-shrink:0}',
+      '.ccf-sf-pname{font-size:13px;font-weight:600;margin:0}',
+      '.ccf-sf-pprice{font-size:12px;color:#6B6B6B;margin:2px 0 0}',
+      // progress
+      '.ccf-sf-progress{display:flex;gap:4px;margin:16px 0 6px}',
+      '.ccf-sf-progress span{flex:1;height:3px;border-radius:2px;background:#E7E5E0;transition:background .2s}',
+      '.ccf-sf-progress span.on{background:#1A1A1A}',
+      '.ccf-sf-stepline{font-size:11.5px;color:#6B6B6B;margin:0}',
+      '.ccf-sf-title{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:18px 0 4px}',
+      '.ccf-sf-lede{font-size:13px;color:#6B6B6B;margin:0 0 16px}',
+      // gender
+      '.ccf-sf-seg{display:flex;border:1px solid #1A1A1A;border-radius:4px;overflow:hidden;margin:0 0 18px}',
+      '.ccf-sf-seg button{flex:1;border:0;background:#fff;padding:10px 8px;font-size:11.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#1A1A1A;cursor:pointer}',
+      '.ccf-sf-seg button[aria-pressed="true"]{background:#1A1A1A;color:#fff}',
+      // measurements with the figure
+      '.ccf-sf-measure{display:flex;gap:14px;align-items:stretch}',
+      '.ccf-sf-figure{width:64px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#1A1A1A}',
+      '.ccf-sf-figure svg{transition:transform .25s}',
+      '.ccf-sf-fields{flex:1;min-width:0}',
       '.ccf-sf-field{margin:0 0 16px;min-width:0}',
-      '.ccf-sf-label{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}',
-      '.ccf-sf-label > span:first-child{font-size:13px;font-weight:500;color:#4A4A4A}',
-      '.ccf-sf-unit{display:inline-flex;background:#F3F4F6;border-radius:8px;padding:2px}',
-      '.ccf-sf-unit button{border:0;background:transparent;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:500;color:#616161;cursor:pointer}',
-      '.ccf-sf-unit button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 2px rgba(17,24,39,.12)}',
-      '.ccf-sf-value{font-size:28px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px}',
-      '.ccf-sf-range{width:100%;accent-color:' + accent + ';margin:0}',
-      '.ccf-sf-scale{display:flex;justify-content:space-between;font-size:11px;color:#8A8A8A;margin-top:2px}',
-      // option cards
-      '.ccf-sf-q{font-size:13px;font-weight:500;color:#4A4A4A;margin:0 0 8px}',
-      '.ccf-sf-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px}',
-      '.ccf-sf-card{border:1.5px solid #E5E7EB;background:#fff;border-radius:12px;padding:10px 8px;text-align:center;cursor:pointer;display:flex;flex-direction:column;gap:2px}',
-      '.ccf-sf-card b{font-size:14px;font-weight:500;color:#303030}',
-      '.ccf-sf-card small{font-size:11px;color:#616161}',
-      '.ccf-sf-card[aria-pressed="true"]{border-color:' + accent + ';background:' + tint + '}',
-      // remember switch
-      '.ccf-sf-check{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F9FAFB;border-radius:12px;padding:12px 14px;cursor:pointer}',
-      '.ccf-sf-check span b{display:block;font-size:13px;font-weight:500;color:#303030}',
-      '.ccf-sf-check span small{font-size:12px;color:#616161}',
-      '.ccf-sf-check input{appearance:none;-webkit-appearance:none;width:40px;height:22px;border-radius:999px;background:#D1D5DB;position:relative;cursor:pointer;flex-shrink:0;margin:0;transition:background .15s}',
+      '.ccf-sf-label{display:flex;justify-content:space-between;align-items:center;margin:0 0 4px}',
+      '.ccf-sf-label > span:first-child{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#6B6B6B}',
+      '.ccf-sf-unit{display:inline-flex;gap:2px}',
+      '.ccf-sf-unit button{border:1px solid #E1DED8;background:#fff;border-radius:3px;padding:2px 7px;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#6B6B6B;cursor:pointer}',
+      '.ccf-sf-unit button[aria-pressed="true"]{background:#1A1A1A;border-color:#1A1A1A;color:#fff}',
+      '.ccf-sf-value{font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1.1;margin:0 0 8px}',
+      '.ccf-sf-value small{font-size:13px;font-weight:500;color:#6B6B6B;margin-left:3px}',
+      '.ccf-sf-ctrl{display:flex;align-items:center;gap:8px}',
+      '.ccf-sf-step-btn{width:26px;height:26px;border-radius:50%;border:1px solid #E1DED8;background:#fff;color:#1A1A1A;font-size:15px;line-height:1;cursor:pointer;flex-shrink:0;padding:0}',
+      '.ccf-sf-step-btn:hover{border-color:#1A1A1A}',
+      '.ccf-sf-range{flex:1;min-width:0;accent-color:#1A1A1A;margin:0;height:20px}',
+      '.ccf-sf-live{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #E7E5E0;border-radius:6px;padding:12px 14px;margin:2px 0 18px}',
+      '.ccf-sf-live b{display:block;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}',
+      '.ccf-sf-live small{font-size:12px;color:#6B6B6B}',
+      '.ccf-sf-live-size{font-size:24px;font-weight:600;min-width:32px;text-align:right}',
+      '.ccf-sf-live.is-busy .ccf-sf-live-size{opacity:.35}',
+      // step 2
+      '.ccf-sf-q{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#6B6B6B;margin:0 0 8px}',
+      '.ccf-sf-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 20px}',
+      '.ccf-sf-card{border:1px solid #E1DED8;background:#fff;border-radius:6px;padding:12px 6px;text-align:center;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:border-color .15s}',
+      '.ccf-sf-card:hover{border-color:#1A1A1A}',
+      '.ccf-sf-card b{font-size:14px;font-weight:600;color:#1A1A1A}',
+      '.ccf-sf-card small{font-size:11px;color:#6B6B6B}',
+      '.ccf-sf-card[aria-pressed="true"]{border:1.5px solid #1A1A1A;background:#F7F6F3}',
+      '.ccf-sf-check{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F7F6F3;border-radius:6px;padding:12px 14px;cursor:pointer;margin:0 0 18px}',
+      '.ccf-sf-check span b{display:block;font-size:13px;font-weight:600;color:#1A1A1A}',
+      '.ccf-sf-check span small{font-size:12px;color:#6B6B6B}',
+      '.ccf-sf-check input{appearance:none;-webkit-appearance:none;width:40px;height:22px;border-radius:999px;background:#D1CEC7;position:relative;cursor:pointer;flex-shrink:0;margin:0;transition:background .15s}',
       '.ccf-sf-check input::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:left .15s}',
-      '.ccf-sf-check input:checked{background:' + accent + '}',
+      '.ccf-sf-check input:checked{background:#1A1A1A}',
       '.ccf-sf-check input:checked::after{left:20px}',
-      // actions
-      '.ccf-sf-actions{display:flex;gap:10px;margin-top:18px}',
-      '.ccf-sf-btn{flex:1;border:1px solid #D1D5DB;background:#fff;color:#303030;border-radius:10px;padding:12px;font-size:14px;font-weight:500;cursor:pointer}',
-      '.ccf-sf-btn-main{flex:2;background:' + accent + ';border-color:' + accent + ';color:#fff}',
-      '.ccf-sf-btn-main[disabled]{opacity:.7;cursor:wait}',
       // result
-      '.ccf-sf-result{text-align:left}',
-      '.ccf-sf-result-top{display:flex;align-items:center;gap:16px;margin:0 0 8px}',
-      '.ccf-sf-summary{flex:1;min-width:0}',
-      '.ccf-sf-kicker{font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#616161;margin:0}',
-      '.ccf-sf-size{width:76px;height:76px;margin:0;flex-shrink:0;border-radius:50%;border:4px solid ' + accent + ';background:' + tint + ';display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:600;color:#303030}',
-      '.ccf-sf-verdict{font-size:16px;font-weight:600;margin:2px 0 10px}',
-      '.ccf-sf-meter{margin:0;text-align:left}',
-      '.ccf-sf-meter-bar{position:relative;height:6px;border-radius:6px;background:linear-gradient(90deg,#FDE68A,#A7F3D0 35%,#A7F3D0 65%,#FDE68A)}',
-      '.ccf-sf-meter-dot{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#fff;border:3px solid ' + accent + '}',
-      '.ccf-sf-meter-labels{display:flex;justify-content:space-between;font-size:11px;color:#616161;margin-top:6px}',
-      '.ccf-sf-reason{display:flex;justify-content:space-between;align-items:center;font-size:13px;border-top:1px solid #F3F4F6;padding:10px 2px;text-align:left}',
-      '.ccf-sf-reason > span:first-child{color:#4A4A4A;font-weight:500}',
-      '.ccf-sf-ok,.ccf-sf-warn{display:inline-flex;align-items:center;gap:6px;font-weight:500}',
-      '.ccf-sf-ok{color:#047857}.ccf-sf-warn{color:#B45309}',
-      '.ccf-sf-ok::before,.ccf-sf-warn::before{content:"";width:16px;height:16px;border-radius:50%;flex-shrink:0;background-repeat:no-repeat;background-position:center;background-size:10px}',
-      ".ccf-sf-ok::before{background-color:#D1FAE5;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23047857' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E\")}",
-      ".ccf-sf-warn::before{background-color:#FEF3C7;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23B45309' stroke-width='3.5' stroke-linecap='round'%3E%3Cpath d='M12 6v7M12 18h.01'/%3E%3C/svg%3E\")}",
-      '.ccf-sf-muted{color:#616161}',
-      '.ccf-sf-note{font-size:12px;color:#616161;margin:10px 0 0}',
-      '.ccf-sf-err{font-size:13px;color:#B42318;font-weight:500;margin:12px 0 0;background:#FEF2F2;border-radius:8px;padding:8px 10px}',
-      '.ccf-sf-link{background:none;border:0;padding:0;color:' + accent + ';text-decoration:underline;text-underline-offset:3px;font-size:13px;font-weight:500;cursor:pointer;margin-top:12px}',
-      '.ccf-sf-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden}',
-      '.ccf-sf-table th{background:#F9FAFB;font-weight:500;color:#4A4A4A}',
-      '.ccf-sf-table th,.ccf-sf-table td{border-bottom:1px solid #F3F4F6;padding:7px 6px;text-align:center}',
-      '@media (max-width:340px){.ccf-sf-fields{grid-template-columns:minmax(0,1fr)}}',
-      '@media (max-width:420px){.ccf-sf-head,.ccf-sf-progress{padding-left:16px;padding-right:16px}.ccf-sf-body{padding:16px}.ccf-sf-value{font-size:24px}}',
+      '.ccf-sf-result{text-align:center;padding-bottom:6px}',
+      '.ccf-sf-result .ccf-sf-title{margin-top:14px}',
+      '.ccf-sf-ring{position:relative;width:132px;height:132px;margin:10px auto 12px;display:flex;flex-direction:column;align-items:center;justify-content:center}',
+      '.ccf-sf-ring svg{position:absolute;inset:0}',
+      '.ccf-sf-ring svg circle{transition:stroke-dashoffset .8s ease-out}',
+      '.ccf-sf-size{font-size:40px;font-weight:600;line-height:1;letter-spacing:-.02em}',
+      '.ccf-sf-ring-label{font-size:12px;color:#6B6B6B;margin-top:4px}',
+      '.ccf-sf-verdict{font-size:13.5px;background:#F7F6F3;border-radius:6px;padding:12px 14px;margin:0 0 12px;text-align:left}',
+      '.ccf-sf-reason{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;background:#F7F6F3;border-left:3px solid #2F6B4F;border-radius:0 6px 6px 0;padding:10px 12px;margin:0 0 6px;text-align:left}',
+      '.ccf-sf-reason.is-warn{border-left-color:#B7791F}',
+      '.ccf-sf-reason.is-info{border-left-color:#C9C5BD}',
+      '.ccf-sf-reason > span:first-child{font-weight:600}',
+      '.ccf-sf-ok,.ccf-sf-warn{display:inline-flex;align-items:center;gap:7px}',
+      '.ccf-sf-ok::before,.ccf-sf-warn::before{content:"";width:7px;height:7px;border-radius:50%;flex-shrink:0}',
+      '.ccf-sf-ok::before{background:#2F6B4F}.ccf-sf-warn::before{background:#B7791F}',
+      '.ccf-sf-muted{color:#6B6B6B}',
+      '.ccf-sf-note{font-size:12px;color:#6B6B6B;margin:10px 0 0;text-align:center}',
+      '.ccf-sf-strip{display:flex;justify-content:center;gap:6px;margin:22px 0 4px;flex-wrap:wrap}',
+      '.ccf-sf-strip span{position:relative;min-width:40px;padding:8px 6px;border:1px solid #E1DED8;border-radius:4px;font-size:12.5px;font-weight:600;color:#1A1A1A;text-align:center}',
+      '.ccf-sf-strip span.is-you{background:#1A1A1A;border-color:#1A1A1A;color:#fff}',
+      '.ccf-sf-strip span.is-you::before{content:"YOU";position:absolute;left:50%;top:-17px;transform:translateX(-50%);font-size:9.5px;letter-spacing:.14em;color:#1A1A1A}',
+      '.ccf-sf-strip span.is-missing{color:#B9B5AD;text-decoration:line-through}',
+      '.ccf-sf-meter{margin:16px 0 4px;text-align:left}',
+      '.ccf-sf-meter-bar{position:relative;height:4px;border-radius:4px;background:linear-gradient(90deg,#E8D9B5,#2F6B4F 50%,#E8D9B5)}',
+      '.ccf-sf-meter-dot{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#fff;border:3px solid #1A1A1A}',
+      '.ccf-sf-meter-labels{display:flex;justify-content:space-between;font-size:11px;color:#6B6B6B;margin-top:6px}',
+      '.ccf-sf-link{background:none;border:0;padding:0;color:#1A1A1A;text-decoration:underline;text-underline-offset:3px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;cursor:pointer}',
+      '.ccf-sf-links{display:flex;justify-content:center;gap:22px;margin:12px 0 0}',
+      '.ccf-sf-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}',
+      '.ccf-sf-table th{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#6B6B6B}',
+      '.ccf-sf-table th,.ccf-sf-table td{border-bottom:1px solid #EEECE8;padding:8px 6px;text-align:center}',
+      '.ccf-sf-table tr.is-you td{background:#F7F6F3;font-weight:600}',
+      // footer
+      '.ccf-sf-foot{border-top:1px solid #EEECE8;padding:14px 22px 16px;background:#fff}',
+      '.ccf-sf-actions{display:flex;gap:10px}',
+      '.ccf-sf-btn{flex:1;border:1px solid #1A1A1A;background:#fff;color:#1A1A1A;border-radius:4px;padding:14px 12px;font-size:14px;font-weight:600;cursor:pointer}',
+      '.ccf-sf-btn-main{flex:2;background:' + accent + ';border-color:' + accent + ';color:#fff}',
+      '.ccf-sf-btn-main:hover{filter:brightness(1.08)}',
+      '.ccf-sf-btn-main[disabled]{opacity:.7;cursor:wait}',
+      '.ccf-sf-arrow::after{content:" \\2192"}',
+      '.ccf-sf-privacy{font-size:11.5px;color:#8A867E;margin:10px 0 0;text-align:center}',
+      '.ccf-sf-err{font-size:13px;color:#B42318;font-weight:500;margin:0 0 12px;background:#FEF2F2;border-radius:6px;padding:9px 12px}',
+      '.ccf-sf-tint{background:' + tint + '}',
+      '@media (max-width:640px){.ccf-sf-top{padding:12px 18px}.ccf-sf-scroll{padding:0 18px}.ccf-sf-foot{padding:12px 18px 14px}.ccf-sf-title{font-size:20px}.ccf-sf-value{font-size:26px}}',
     ].join('');
     document.head.appendChild(s);
   }
@@ -226,10 +272,30 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
 
   // ── Main ───────────────────────────────────────────────────────────────────
 
+  var STEP_NAMES = { 1: 'Measurements', 2: 'Your fit', 3: 'Your size' };
+  var REASON_TEXT = { right: 'Right for your fit', snug: 'A little snug', roomy: 'A little roomy' };
+  var H_MIN = 140, H_MAX = 200, W_MIN = 40, W_MAX = 130;
+
+  // Simple standing figure; gets wider with the body-mass index and taller with height.
+  function figureSvg(heightCm, weightKg) {
+    var bmi = weightKg / Math.pow(heightCm / 100, 2);
+    var sx = Math.max(0.82, Math.min(1.35, bmi / 22));
+    var sy = Math.max(0.88, Math.min(1.08, heightCm / 172));
+    return '<svg width="56" height="150" viewBox="0 0 56 150" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:scale(' + sx.toFixed(3) + ',' + sy.toFixed(3) + ');transform-origin:50% 100%">' +
+      '<circle cx="28" cy="13" r="9"/>' +
+      '<path d="M28 22v4M17 30c3-3 7-4 11-4s8 1 11 4l4 34M17 30l-4 34M19 32v40l-2 74M37 32v40l2 74M28 74v72M19 72h18"/>' +
+      '</svg>';
+  }
+
   function init(root, settings) {
     var shop = root.getAttribute('data-shop') || '';
     var sizeOption = root.getAttribute('data-size-option') || 'Size';
     var sizeValues = (root.getAttribute('data-size-values') || '').split('|').filter(Boolean);
+    var product = {
+      title: root.getAttribute('data-product-title') || '',
+      price: root.getAttribute('data-product-price') || '',
+      image: root.getAttribute('data-product-image') || '',
+    };
     var accent = /^#[0-9A-Fa-f]{6}$/.test(settings.accentColor || '') ? settings.accentColor : '#111827';
     var genders = Array.isArray(settings.genders) ? settings.genders : [];
     if (!genders.length) { root.remove(); return; }
@@ -248,6 +314,8 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       fit: saved.fit || 'regular',
       remember: false,
       result: null,
+      live: '',
+      liveBusy: false,
       busy: false,
       error: '',
       showChart: false,
@@ -256,17 +324,26 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
     var design = root.getAttribute('data-design-mode') === 'true' || !!(window.Shopify && window.Shopify.designMode);
     if (!design) placeNearSizePicker(root, sizeOption);
 
+    // Trigger card on the page
     var wrap = el('div', 'ccf-sf');
     var open = el('button', 'ccf-sf-open ccf-sf-trigger');
     open.type = 'button';
     open.setAttribute('aria-expanded', 'false');
-    var panel = el('div', 'ccf-sf-panel');
-    panel.hidden = true;
+    open.setAttribute('aria-haspopup', 'dialog');
     wrap.appendChild(open);
-    wrap.appendChild(panel);
     root.appendChild(wrap);
 
-    // The card: "Not sure about your size?" until the shopper has a size, then "Your size: M".
+    // Drawer (desktop) / bottom sheet (phone), attached to <body> so theme layout can't clip it.
+    var overlay = el('div', 'ccf-sf-overlay');
+    overlay.hidden = true;
+    var panel = el('div', 'ccf-sf-panel');
+    panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Size advisor');
+    document.body.appendChild(overlay);
+    document.body.appendChild(panel);
+
     function setOpenLabel(size) {
       open.innerHTML = '';
       open.classList.toggle('is-done', !!size);
@@ -281,29 +358,60 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       cta.style.borderRadius = ctaRadius(settings.buttonRadius);
       open.appendChild(cta);
     }
-    var known = saved.size && (!sizeValues.length || sizeValues.some(function (v) { return v.toLowerCase() === String(saved.size).toLowerCase(); }));
-    setOpenLabel(known ? saved.size : '');
-
-    function close() {
-      panel.hidden = true;
-      open.setAttribute('aria-expanded', 'false');
+    function sells(size) {
+      return !sizeValues.length || sizeValues.some(function (v) { return v.toLowerCase() === String(size).toLowerCase(); });
     }
+    setOpenLabel(saved.size && sells(saved.size) ? saved.size : '');
 
-    open.addEventListener('click', function () {
-      panel.hidden = !panel.hidden;
-      open.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
-      if (!panel.hidden) { state.step = state.result ? 3 : 1; draw(); }
-    });
+    var lastFocus = null;
+    var prevOverflow = '';
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    function show() {
+      lastFocus = document.activeElement;
+      state.step = state.result ? 3 : 1;
+      state.error = '';
+      overlay.hidden = false;
+      panel.hidden = false;
+      prevOverflow = document.documentElement.style.overflow;
+      document.documentElement.style.overflow = 'hidden';
+      open.setAttribute('aria-expanded', 'true');
+      document.addEventListener('keydown', onKey);
+      draw();
+      // next frame → slide in
+      requestAnimationFrame(function () { overlay.classList.add('is-open'); panel.classList.add('is-open'); });
+      var x = panel.querySelector('.ccf-sf-close');
+      if (x) try { x.focus({ preventScroll: true }); } catch (e) {}
+      if (state.step === 1 && !state.live) estimateSoon(0);
+    }
+    function close() {
+      overlay.classList.remove('is-open');
+      panel.classList.remove('is-open');
+      overlay.hidden = true;
+      panel.hidden = true;
+      document.documentElement.style.overflow = prevOverflow;
+      open.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('keydown', onKey);
+      if (lastFocus && lastFocus.focus) try { lastFocus.focus({ preventScroll: true }); } catch (e) {}
+    }
+    open.addEventListener('click', function () { if (panel.hidden) show(); else close(); });
+    overlay.addEventListener('click', close);
+
+    // ── small builders ──
+    function button(cls, text, onClick, label) {
+      var b = el('button', cls, text);
+      b.type = 'button';
+      if (label) b.setAttribute('aria-label', label);
+      b.addEventListener('click', onClick);
+      return b;
+    }
 
     function segmented(options, current, onPick, labelText) {
       var box = el('div', 'ccf-sf-seg');
       box.setAttribute('role', 'group');
       box.setAttribute('aria-label', labelText);
       options.forEach(function (o) {
-        var b = el('button', null, o.label);
-        b.type = 'button';
+        var b = button(null, o.label, function () { onPick(o.value); draw(); });
         b.setAttribute('aria-pressed', o.value === current ? 'true' : 'false');
-        b.addEventListener('click', function () { onPick(o.value); draw(); });
         box.appendChild(b);
       });
       return box;
@@ -314,13 +422,10 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       box.setAttribute('role', 'group');
       box.setAttribute('aria-label', labelText);
       options.forEach(function (o) {
-        var b = el('button', 'ccf-sf-card');
-        b.type = 'button';
-        b.setAttribute('aria-label', o.label);
+        var b = button('ccf-sf-card', null, function () { onPick(o.value); draw(); }, o.label);
         b.setAttribute('aria-pressed', o.value === current ? 'true' : 'false');
         b.appendChild(el('b', null, o.label));
         b.appendChild(el('small', null, o.hint));
-        b.addEventListener('click', function () { onPick(o.value); draw(); });
         box.appendChild(b);
       });
       return box;
@@ -331,49 +436,93 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       box.setAttribute('role', 'group');
       box.setAttribute('aria-label', labelText);
       opts.forEach(function (u) {
-        var b = el('button', null, u);
-        b.type = 'button';
-        b.setAttribute('aria-pressed', u === current ? 'true' : 'false');
-        b.addEventListener('click', function () { onPick(u); draw(); });
+        var b = button(null, u[1], function () { onPick(u[0]); draw(); });
+        b.setAttribute('aria-pressed', u[0] === current ? 'true' : 'false');
         box.appendChild(b);
       });
       return box;
     }
 
-    function heightText() {
-      if (state.hUnit === 'cm') return Math.round(state.heightCm) + ' cm';
+    function heightParts() {
+      if (state.hUnit === 'cm') return [String(Math.round(state.heightCm)), 'cm'];
       var totalIn = Math.round(state.heightCm / CM_PER_IN);
-      return Math.floor(totalIn / 12) + '′ ' + (totalIn % 12) + '″';
+      return [Math.floor(totalIn / 12) + '′ ' + (totalIn % 12) + '″', ''];
     }
-    function weightText() {
-      return state.wUnit === 'kg' ? Math.round(state.weightKg) + ' kg' : Math.round(state.weightKg / KG_PER_LB) + ' lb';
+    function weightParts() {
+      return state.wUnit === 'kg' ? [String(Math.round(state.weightKg)), 'kg'] : [String(Math.round(state.weightKg / KG_PER_LB)), 'lb'];
+    }
+    function fillValue(v, parts) {
+      v.textContent = parts[0];
+      if (parts[1]) v.appendChild(el('small', null, parts[1]));
     }
 
-    function slider(label, min, max, value, onInput, valueText, unitEl, scale) {
+    // One measurement: label + unit switch, big value, − slider +.
+    function measure(label, min, max, get, setv, parts, unitEl, stepSize) {
       var f = el('div', 'ccf-sf-field');
       var l = el('div', 'ccf-sf-label');
       l.appendChild(el('span', null, label));
       l.appendChild(unitEl);
       f.appendChild(l);
-      var v = el('div', 'ccf-sf-value', valueText());
+      var v = el('div', 'ccf-sf-value');
+      fillValue(v, parts());
+      f.appendChild(v);
+      var row = el('div', 'ccf-sf-ctrl');
       var input = el('input', 'ccf-sf-range');
       input.type = 'range';
       input.min = String(min);
       input.max = String(max);
       input.step = '1';
-      input.value = String(Math.round(value));
+      input.value = String(Math.round(get()));
       input.setAttribute('aria-label', label);
-      input.addEventListener('input', function () { onInput(Number(input.value)); v.textContent = valueText(); });
-      f.appendChild(v);
-      f.appendChild(input);
-      var sc = el('div', 'ccf-sf-scale');
-      sc.appendChild(el('span', null, scale[0]));
-      sc.appendChild(el('span', null, scale[1]));
-      f.appendChild(sc);
+      function changed(val) {
+        setv(Math.max(min, Math.min(max, val)));
+        input.value = String(Math.round(get()));
+        fillValue(v, parts());
+        redrawFigure();
+      }
+      input.addEventListener('input', function () { changed(Number(input.value)); });
+      input.addEventListener('change', function () { estimateSoon(250); });
+      row.appendChild(button('ccf-sf-step-btn', '−', function () { changed(get() - stepSize); estimateSoon(450); }, 'Less ' + label.toLowerCase()));
+      row.appendChild(input);
+      row.appendChild(button('ccf-sf-step-btn', '+', function () { changed(get() + stepSize); estimateSoon(450); }, 'More ' + label.toLowerCase()));
+      f.appendChild(row);
       return f;
     }
 
-    function chartTable(gender) {
+    var figureBox = null;
+    function redrawFigure() { if (figureBox) figureBox.innerHTML = figureSvg(state.heightCm, state.weightKg); }
+
+    // Live estimate on step 1 (same backend maths, average shape + regular fit, never saved).
+    var liveTimer = null;
+    var liveBox = null;
+    function paintLive() {
+      if (!liveBox) return;
+      liveBox.classList.toggle('is-busy', state.liveBusy);
+      var s = liveBox.querySelector('.ccf-sf-live-size');
+      if (s) s.textContent = state.live || '—';
+    }
+    function estimateSoon(ms) {
+      clearTimeout(liveTimer);
+      state.liveBusy = true;
+      paintLive();
+      liveTimer = setTimeout(function () {
+        if (!panel.isConnected || panel.hidden || state.step !== 1) { state.liveBusy = false; return; }
+        fetch(PROXY + '/recommend?shop=' + encodeURIComponent(shop), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            gender: state.gender, heightCm: Math.round(state.heightCm), weightKg: Math.round(state.weightKg),
+            shape: 'average', fit: 'regular', remember: false, sessionId: '',
+          }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) { state.live = d && d.ok && d.size ? d.size : ''; })
+          .catch(function () { state.live = ''; })
+          .then(function () { state.liveBusy = false; paintLive(); });
+      }, ms);
+    }
+
+    function chartTable(gender, you) {
       var rows = (settings.charts && settings.charts[gender]) || [];
       var inch = state.hUnit === 'ft';
       var t = el('table', 'ccf-sf-table');
@@ -381,7 +530,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       ['Size', 'Chest', 'Waist', 'Length'].forEach(function (h) { head.appendChild(el('th', null, h + (h === 'Size' ? '' : inch ? ' (in)' : ' (cm)'))); });
       t.appendChild(head);
       rows.forEach(function (r) {
-        var tr = el('tr');
+        var tr = el('tr', String(r.size) === String(you) ? 'is-you' : null);
         tr.appendChild(el('td', null, r.size));
         [r.chest, r.waist, r.length].forEach(function (n) {
           tr.appendChild(el('td', null, !n ? '—' : inch ? (Math.round(n / CM_PER_IN * 10) / 10).toString() : String(n)));
@@ -391,27 +540,12 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       return t;
     }
 
-    function actions(backFn, mainText, mainFn) {
-      var a = el('div', 'ccf-sf-actions');
-      if (backFn) {
-        var back = el('button', 'ccf-sf-btn', 'Back');
-        back.type = 'button';
-        back.addEventListener('click', backFn);
-        a.appendChild(back);
-      }
-      var main = el('button', 'ccf-sf-btn ccf-sf-btn-main', mainText);
-      main.type = 'button';
-      main.disabled = state.busy;
-      main.addEventListener('click', mainFn);
-      a.appendChild(main);
-      return a;
-    }
-
-    function remember() {
+    function remember(extra) {
+      var prev = readJSON(STORE_KEY) || {};
       writeJSON(STORE_KEY, {
         gender: state.gender, heightCm: state.heightCm, weightKg: state.weightKg,
         hUnit: state.hUnit, wUnit: state.wUnit, shape: state.shape, fit: state.fit,
-        size: (readJSON(STORE_KEY) || {}).size,
+        size: extra && extra.size ? extra.size : prev.size,
       });
     }
 
@@ -450,58 +584,132 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         });
     }
 
-    var REASON_TEXT = { right: 'Right for your fit', snug: 'A little snug', roomy: 'A little roomy' };
-    var TITLES = { 1: 'Find your size', 2: 'Tell us about your fit', 3: 'Your size' };
-
-    function header() {
-      var h = el('div', 'ccf-sf-head');
-      var left = el('div');
-      left.appendChild(el('p', 'ccf-sf-step', 'Step ' + state.step + ' of 3'));
-      left.appendChild(el('p', 'ccf-sf-title', TITLES[state.step]));
-      h.appendChild(left);
-      var x = el('button', 'ccf-sf-close', '×');
-      x.type = 'button';
-      x.setAttribute('aria-label', 'Close');
-      x.addEventListener('click', close);
-      h.appendChild(x);
-      panel.appendChild(h);
-      var p = el('div', 'ccf-sf-progress');
-      p.setAttribute('aria-hidden', 'true');
-      for (var i = 1; i <= 3; i++) p.appendChild(el('span', i <= state.step ? 'on' : null));
-      panel.appendChild(p);
+    // The theme's add-to-cart button for this product, if there is one we can press.
+    function addButton() {
+      var scope = root.closest('.shopify-section') || document;
+      var form = scope.querySelector('form[action*="/cart/add"]') || document.querySelector('form[action*="/cart/add"]');
+      if (!form) return null;
+      return form.querySelector('button[type="submit"][name="add"], button[name="add"], button[type="submit"], input[type="submit"]');
     }
 
+    function chooseSize(size, addToBag) {
+      var ok = selectSizeOnPage(sizeOption, size);
+      if (!ok) {
+        state.error = 'Choose ' + size + ' from the sizes on the page.';
+        draw();
+        return;
+      }
+      remember({ size: size });
+      setOpenLabel(size);
+      if (!addToBag) { close(); return; }
+      // Themes swap the variant after the size changes; press "Add to cart" once that has happened.
+      setTimeout(function () {
+        var b = addButton();
+        if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') {
+          close();
+          b.click();
+        } else {
+          state.error = 'Size ' + size + ' is sold out right now.';
+          draw();
+        }
+      }, 350);
+    }
+
+    // ── drawing ──
     function draw() {
       panel.innerHTML = '';
-      header();
-      var body = el('div', 'ccf-sf-body');
-      panel.appendChild(body);
+      liveBox = null;
+      figureBox = null;
+      panel.appendChild(el('div', 'ccf-sf-grab'));
+      var head = el('div', 'ccf-sf-top');
+      head.appendChild(el('p', 'ccf-sf-brand', 'Size advisor'));
+      head.appendChild(button('ccf-sf-close', '×', close, 'Close'));
+      panel.appendChild(head);
+
+      var scroll = el('div', 'ccf-sf-scroll');
+      panel.appendChild(scroll);
+      var foot = el('div', 'ccf-sf-foot');
+      panel.appendChild(foot);
+
+      if (product.title) {
+        var p = el('div', 'ccf-sf-product');
+        if (product.image) {
+          var img = el('img', 'ccf-sf-thumb');
+          img.src = product.image;
+          img.alt = '';
+          img.loading = 'lazy';
+          p.appendChild(img);
+        } else {
+          p.appendChild(el('span', 'ccf-sf-thumb'));
+        }
+        var pt = el('div');
+        pt.appendChild(el('p', 'ccf-sf-pname', product.title));
+        if (product.price) pt.appendChild(el('p', 'ccf-sf-pprice', product.price));
+        p.appendChild(pt);
+        scroll.appendChild(p);
+      }
+
+      var prog = el('div', 'ccf-sf-progress');
+      prog.setAttribute('aria-hidden', 'true');
+      for (var i = 1; i <= 3; i++) prog.appendChild(el('span', i <= state.step ? 'on' : null));
+      scroll.appendChild(prog);
+      var sl = el('p', 'ccf-sf-stepline');
+      sl.appendChild(el('span', 'ccf-sf-step', 'Step ' + state.step + ' of 3'));
+      sl.appendChild(document.createTextNode(' · ' + STEP_NAMES[state.step]));
+      scroll.appendChild(sl);
+
+      if (state.error) {
+        var err = el('p', 'ccf-sf-err', state.error);
+        err.setAttribute('role', 'alert');
+      }
 
       if (state.step === 1) {
+        scroll.appendChild(el('h2', 'ccf-sf-title', 'Let’s find your fit'));
+        scroll.appendChild(el('p', 'ccf-sf-lede', 'Two measurements, about ten seconds.'));
         if (genders.length > 1) {
-          body.appendChild(segmented(
-            genders.map(function (g) { return { value: g, label: g === 'men' ? 'Men' : 'Women' }; }),
-            state.gender, function (v) { state.gender = v; }, 'Women or men'
+          scroll.appendChild(segmented(
+            genders.map(function (g) { return { value: g, label: g === 'men' ? 'Menswear' : 'Womenswear' }; }),
+            state.gender, function (v) { if (v !== state.gender) { state.gender = v; estimateSoon(200); } }, 'Womenswear or menswear'
           ));
         }
+        var m = el('div', 'ccf-sf-measure');
+        figureBox = el('div', 'ccf-sf-figure');
+        m.appendChild(figureBox);
+        redrawFigure();
         var fields = el('div', 'ccf-sf-fields');
-        body.appendChild(fields);
-        fields.appendChild(slider('Height', 140, 200, state.heightCm, function (v) { state.heightCm = v; }, heightText,
-          unitToggle(['cm', 'ft'], state.hUnit, function (u) { state.hUnit = u; }, 'Height unit'),
-          state.hUnit === 'cm' ? ['140 cm', '200 cm'] : ['4′ 7″', '6′ 7″']));
-        fields.appendChild(slider('Weight', 40, 130, state.weightKg, function (v) { state.weightKg = v; }, weightText,
-          unitToggle(['kg', 'lb'], state.wUnit, function (u) { state.wUnit = u; }, 'Weight unit'),
-          state.wUnit === 'kg' ? ['40 kg', '130 kg'] : ['88 lb', '287 lb']));
-        body.appendChild(actions(null, 'Continue', function () { state.step = 2; draw(); }));
+        fields.appendChild(measure('Height', H_MIN, H_MAX, function () { return state.heightCm; }, function (v) { state.heightCm = v; }, heightParts,
+          unitToggle([['cm', 'cm'], ['ft', 'ft/in']], state.hUnit, function (u) { state.hUnit = u; }, 'Height unit'), 1));
+        fields.appendChild(measure('Weight', W_MIN, W_MAX, function () { return state.weightKg; }, function (v) { state.weightKg = v; }, weightParts,
+          unitToggle([['kg', 'kg'], ['lb', 'lb']], state.wUnit, function (u) { state.wUnit = u; }, 'Weight unit'), 1));
+        m.appendChild(fields);
+        scroll.appendChild(m);
+
+        liveBox = el('div', 'ccf-sf-live');
+        liveBox.setAttribute('aria-live', 'polite');
+        var lt = el('div');
+        lt.appendChild(el('b', null, 'Live estimate'));
+        lt.appendChild(el('small', null, 'Refines in the next steps'));
+        liveBox.appendChild(lt);
+        liveBox.appendChild(el('span', 'ccf-sf-live-size', state.live || '—'));
+        scroll.appendChild(liveBox);
+        paintLive();
+
+        if (err) foot.appendChild(err);
+        var a1 = el('div', 'ccf-sf-actions');
+        a1.appendChild(button('ccf-sf-btn ccf-sf-btn-main ccf-sf-arrow', 'Continue', function () { state.step = 2; state.error = ''; draw(); }));
+        foot.appendChild(a1);
+        foot.appendChild(el('p', 'ccf-sf-privacy', 'Used only to work out your size — your height and weight are never saved by the store.'));
       } else if (state.step === 2) {
-        body.appendChild(el('p', 'ccf-sf-q', 'Your body shape'));
-        body.appendChild(cards([
+        scroll.appendChild(el('h2', 'ccf-sf-title', 'How do you like it to fit?'));
+        scroll.appendChild(el('p', 'ccf-sf-lede', 'Two quick choices make the size more accurate.'));
+        scroll.appendChild(el('p', 'ccf-sf-q', 'Body shape'));
+        scroll.appendChild(cards([
           { value: 'slim', label: 'Slim', hint: 'Narrow frame' },
           { value: 'average', label: 'Average', hint: 'Medium frame' },
           { value: 'broad', label: 'Broad', hint: 'Wider frame' },
         ], state.shape, function (v) { state.shape = v; }, 'Body shape'));
-        body.appendChild(el('p', 'ccf-sf-q', 'How do you like it to fit?'));
-        body.appendChild(cards([
+        scroll.appendChild(el('p', 'ccf-sf-q', 'Preferred fit'));
+        scroll.appendChild(cards([
           { value: 'snug', label: 'Snug', hint: 'Close to body' },
           { value: 'regular', label: 'Regular', hint: 'Classic fit' },
           { value: 'relaxed', label: 'Relaxed', hint: 'Loose and easy' },
@@ -517,33 +725,38 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         cb.setAttribute('aria-label', 'Remember my size');
         cb.addEventListener('change', function () { state.remember = cb.checked; });
         lbl.appendChild(cb);
-        body.appendChild(lbl);
-        body.appendChild(actions(function () { state.step = 1; draw(); }, state.busy ? 'Working it out…' : 'See my size', getSize));
+        scroll.appendChild(lbl);
+
+        if (err) foot.appendChild(err);
+        var a2 = el('div', 'ccf-sf-actions');
+        a2.appendChild(button('ccf-sf-btn', 'Back', function () { state.step = 1; state.error = ''; draw(); }));
+        var see = button('ccf-sf-btn ccf-sf-btn-main', state.busy ? 'Working it out…' : 'See my size', getSize);
+        see.disabled = state.busy;
+        a2.appendChild(see);
+        foot.appendChild(a2);
       } else {
         var r = state.result || {};
+        var available = sells(r.size);
         var box = el('div', 'ccf-sf-result');
-        var top = el('div', 'ccf-sf-result-top');
-        top.appendChild(el('div', 'ccf-sf-size', r.size || '?'));
-        var summary = el('div', 'ccf-sf-summary');
-        summary.appendChild(el('p', 'ccf-sf-kicker', 'We recommend'));
-        summary.appendChild(el('p', 'ccf-sf-verdict', r.outOfRange ? 'Our largest size — it may feel tight' : 'Best fit for you'));
-        top.appendChild(summary);
-        box.appendChild(top);
+        box.appendChild(el('h2', 'ccf-sf-title', 'Your size'));
 
-        var meter = el('div', 'ccf-sf-meter');
-        meter.setAttribute('aria-hidden', 'true');
-        var bar = el('div', 'ccf-sf-meter-bar');
-        var dot = el('span', 'ccf-sf-meter-dot');
-        dot.style.left = meterPosition(r.reasons) + '%';
-        bar.appendChild(dot);
-        meter.appendChild(bar);
-        var ml = el('div', 'ccf-sf-meter-labels');
-        ['Snug', 'Perfect', 'Roomy'].forEach(function (t) { ml.appendChild(el('span', null, t)); });
-        meter.appendChild(ml);
-        summary.appendChild(meter);
+        var ring = el('div', 'ccf-sf-ring');
+        var good = !r.outOfRange;
+        var C = 2 * Math.PI * 60;
+        ring.innerHTML = '<svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true"><circle cx="66" cy="66" r="60" fill="none" stroke="#EEECE8" stroke-width="6"/>' +
+          '<circle cx="66" cy="66" r="60" fill="none" stroke="' + (good ? '#2F6B4F' : '#B7791F') + '" stroke-width="6" stroke-linecap="round" stroke-dasharray="' + C.toFixed(1) + '" stroke-dashoffset="' + (good ? 0 : C * 0.3).toFixed(1) + '" transform="rotate(-90 66 66)"/></svg>';
+        var sz = el('div', 'ccf-sf-size', r.size || '?');
+        sz.setAttribute('aria-label', 'Recommended size');
+        ring.appendChild(sz);
+        ring.appendChild(el('span', 'ccf-sf-ring-label', good ? 'Best fit' : 'Closest fit'));
+        box.appendChild(ring);
+
+        box.appendChild(el('p', 'ccf-sf-verdict', r.outOfRange
+          ? (r.size + ' is our largest size — it may feel tight. Check the size chart below.')
+          : (r.size + ' lines up best with your measurements and the fit you chose.')));
 
         (r.reasons || []).forEach(function (x) {
-          var row = el('div', 'ccf-sf-reason');
+          var row = el('div', 'ccf-sf-reason' + (x.status === 'info' ? ' is-info' : x.status === 'right' ? '' : ' is-warn'));
           row.appendChild(el('span', null, x.area.charAt(0).toUpperCase() + x.area.slice(1)));
           if (x.status === 'info') {
             var len = state.hUnit === 'ft' ? (Math.round(x.value / CM_PER_IN * 10) / 10) + ' in' : x.value + ' cm';
@@ -553,43 +766,53 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
           }
           box.appendChild(row);
         });
-        var available = !sizeValues.length || sizeValues.some(function (v) { return v.toLowerCase() === String(r.size).toLowerCase(); });
+
+        var chartSizes = ((settings.charts && settings.charts[state.gender]) || []).map(function (c) { return String(c.size); });
+        if (chartSizes.length) {
+          var strip = el('div', 'ccf-sf-strip');
+          strip.setAttribute('aria-hidden', 'true');
+          chartSizes.forEach(function (s) {
+            strip.appendChild(el('span', s === String(r.size) ? 'is-you' : (!sells(s) ? 'is-missing' : null), s));
+          });
+          box.appendChild(strip);
+        }
+
+        var meter = el('div', 'ccf-sf-meter');
+        meter.setAttribute('aria-hidden', 'true');
+        var bar = el('div', 'ccf-sf-meter-bar');
+        var dot = el('span', 'ccf-sf-meter-dot');
+        dot.style.left = meterPosition(r.reasons) + '%';
+        bar.appendChild(dot);
+        meter.appendChild(bar);
+        var ml = el('div', 'ccf-sf-meter-labels');
+        ['Snug', 'Just right', 'Roomy'].forEach(function (t) { ml.appendChild(el('span', null, t)); });
+        meter.appendChild(ml);
+        box.appendChild(meter);
+
         if (!available) box.appendChild(el('p', 'ccf-sf-note', 'This product doesn’t come in ' + r.size + '. Check the size chart for the closest size.'));
         if (r.saved) box.appendChild(el('p', 'ccf-sf-note', 'Saved — we’ll remember ' + r.size + ' for next time.'));
-        body.appendChild(box);
+        box.appendChild(el('p', 'ccf-sf-note', 'Based on your height, weight and answers, compared with this product’s size chart. It’s a guide, not a guarantee.'));
 
-        var chartBtn = el('button', 'ccf-sf-link', state.showChart ? 'Hide size chart' : 'View size chart');
-        chartBtn.type = 'button';
-        chartBtn.addEventListener('click', function () { state.showChart = !state.showChart; draw(); });
-        body.appendChild(chartBtn);
-        if (state.showChart) body.appendChild(chartTable(state.gender));
-        body.appendChild(actions(
-          function () { state.step = 1; state.result = null; draw(); },
-          available ? 'Select size ' + r.size : 'Close',
-          function () {
-            if (available) {
-              var ok = selectSizeOnPage(sizeOption, r.size);
-              state.error = ok ? '' : 'Choose ' + r.size + ' from the sizes above.';
-              if (ok) {
-                close();
-                setOpenLabel(r.size);
-                var a = readJSON(STORE_KEY) || {};
-                a.size = r.size;
-                writeJSON(STORE_KEY, a);
-              }
-              else draw();
-            } else {
-              close();
-            }
+        var links = el('div', 'ccf-sf-links');
+        links.appendChild(button('ccf-sf-link', state.showChart ? 'Hide size chart' : 'View size chart', function () { state.showChart = !state.showChart; draw(); }));
+        links.appendChild(button('ccf-sf-link', 'Edit details', function () { state.step = 1; state.result = null; state.error = ''; draw(); estimateSoon(0); }));
+        box.appendChild(links);
+        if (state.showChart) box.appendChild(chartTable(state.gender, r.size));
+        scroll.appendChild(box);
+
+        if (err) foot.appendChild(err);
+        var a3 = el('div', 'ccf-sf-actions');
+        if (available) {
+          if (addButton()) {
+            a3.appendChild(button('ccf-sf-btn', 'Select ' + r.size, function () { chooseSize(r.size, false); }, 'Select size ' + r.size + ' on the page'));
+            a3.appendChild(button('ccf-sf-btn ccf-sf-btn-main', 'Add size ' + r.size + ' to bag', function () { chooseSize(r.size, true); }));
+          } else {
+            a3.appendChild(button('ccf-sf-btn ccf-sf-btn-main', 'Select size ' + r.size, function () { chooseSize(r.size, false); }));
           }
-        ));
-        body.appendChild(el('p', 'ccf-sf-note', 'A guide based on your answers and this store’s size chart.'));
-      }
-
-      if (state.error) {
-        var err = el('p', 'ccf-sf-err', state.error);
-        err.setAttribute('role', 'alert');
-        body.appendChild(err);
+        } else {
+          a3.appendChild(button('ccf-sf-btn ccf-sf-btn-main', 'Close', close));
+        }
+        foot.appendChild(a3);
       }
     }
   }

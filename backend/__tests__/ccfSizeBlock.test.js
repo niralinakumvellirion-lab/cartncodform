@@ -98,7 +98,7 @@ describe('ccf-size.js', () => {
     await load();
     q('.ccf-sf-open').click();
     expect(q('.ccf-sf-step').textContent).toBe('Step 1 of 3');
-    btn('Men').click();
+    btn('Menswear').click();
     const height = q('input[aria-label="Height"]');
     height.value = '178';
     height.dispatchEvent(new Event('input'));
@@ -108,7 +108,8 @@ describe('ccf-size.js', () => {
     btn('See my size').click();
     await flush(); await flush();
 
-    expect(recommendBodies[0]).toEqual({
+    // The last call is "See my size" (earlier ones are the live estimate).
+    expect(recommendBodies.at(-1)).toEqual({
       gender: 'men', heightCm: 178, weightKg: 60, shape: 'broad', fit: 'relaxed', remember: false, sessionId: '',
     });
     expect(q('.ccf-sf-size').textContent).toBe('M');
@@ -129,8 +130,8 @@ describe('ccf-size.js', () => {
     q('.ccf-sf-check input').click();
     btn('See my size').click();
     await flush(); await flush();
-    expect(recommendBodies[0].remember).toBe(true);
-    expect(recommendBodies[0].sessionId).toBe('abc12345-session');
+    expect(recommendBodies.at(-1).remember).toBe(true);
+    expect(recommendBodies.at(-1).sessionId).toBe('abc12345-session');
     const stored = JSON.parse(localStorage.getItem('ccf_size_answers_demo.myshopify.com'));
     expect(stored.gender).toBe('women');
   });
@@ -138,7 +139,7 @@ describe('ccf-size.js', () => {
   test('height in feet and inches', async () => {
     await load();
     q('.ccf-sf-open').click();
-    btn('ft').click();
+    btn('ft/in').click();
     const values = Array.from(document.querySelectorAll('.ccf-sf-value')).map((v) => v.textContent);
     expect(values[0]).toBe('5′ 4″'); // 162 cm
   });
@@ -277,5 +278,85 @@ describe('ccf-size.js — card that shoppers notice', () => {
       await p; await flush(); await flush();
       expect(q('.ccf-sf-trigger')).not.toBeNull();
     } finally { jest.useRealTimers(); }
+  });
+});
+
+describe('ccf-size.js — size advisor drawer', () => {
+  test('opens as a dialog on <body> with the product, closes with Esc or the backdrop', async () => {
+    await load({ pageHtml: `
+      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S"><input type="radio" name="Size" value="M"></fieldset></form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M"
+           data-product-title="Cotton Kurta" data-product-price="₹1,299" data-design-mode="false"></div>` });
+    q('.ccf-sf-open').click();
+    const panel = q('.ccf-sf-panel');
+    expect(panel.parentElement).toBe(document.body);
+    expect(panel.getAttribute('role')).toBe('dialog');
+    expect(q('.ccf-sf-brand').textContent).toBe('Size advisor');
+    expect(q('.ccf-sf-pname').textContent).toBe('Cotton Kurta');
+    expect(q('.ccf-sf-pprice').textContent).toBe('₹1,299');
+    expect(q('.ccf-sf-stepline').textContent).toBe('Step 1 of 3 · Measurements');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(panel.hidden).toBe(true);
+    q('.ccf-sf-open').click();
+    q('.ccf-sf-overlay').click();
+    expect(panel.hidden).toBe(true);
+  });
+
+  test('live estimate on step 1, and − / + change the height', async () => {
+    await load({ recommend: { ok: true, size: 'S', reasons: [], saved: false } });
+    q('.ccf-sf-open').click();
+    await new Promise((res) => setTimeout(res, 10)); await flush(); await flush();
+    expect(q('.ccf-sf-live-size').textContent).toBe('S');
+    expect(recommendBodies[0]).toMatchObject({ shape: 'average', fit: 'regular', remember: false });
+    btn('More height').click();
+    expect(q('.ccf-sf-value').textContent).toBe('163cm');
+    btn('Less height').click();
+    btn('Less height').click();
+    expect(q('.ccf-sf-value').textContent).toBe('161cm');
+  });
+
+  test('result: size ring, YOU marker on the size strip, edit details goes back', async () => {
+    await load();
+    q('.ccf-sf-open').click();
+    btn('Continue').click();
+    btn('See my size').click();
+    await flush(); await flush();
+    expect(q('.ccf-sf-ring .ccf-sf-size').textContent).toBe('M');
+    expect(q('.ccf-sf-strip .is-you').textContent).toBe('M');
+    btn('Edit details').click();
+    expect(q('.ccf-sf-step').textContent).toBe('Step 1 of 3');
+  });
+
+  test('"Add size M to bag" picks M and presses the theme add-to-cart button', async () => {
+    await load({ pageHtml: `
+      <form action="/cart/add" id="pf"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S" checked><input type="radio" name="Size" value="M"></fieldset>
+        <button type="submit" name="add" id="add">Add to cart</button></form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
+    let added = 0;
+    q('#pf').addEventListener('submit', (e) => { e.preventDefault(); added += 1; });
+    q('.ccf-sf-open').click();
+    btn('Continue').click();
+    btn('See my size').click();
+    await flush(); await flush();
+    btn('Add size M to bag').click();
+    expect(q('input[name="Size"][value="M"]').checked).toBe(true);
+    await new Promise((res) => setTimeout(res, 400));
+    expect(added).toBe(1);
+    expect(q('.ccf-sf-panel').hidden).toBe(true);
+    expect(q('.ccf-sf-card-title').textContent).toBe('Your size: M');
+  });
+
+  test('sold-out size: explains instead of adding', async () => {
+    await load({ pageHtml: `
+      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S" checked><input type="radio" name="Size" value="M"></fieldset>
+        <button type="submit" name="add" disabled>Sold out</button></form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
+    q('.ccf-sf-open').click();
+    btn('Continue').click();
+    btn('See my size').click();
+    await flush(); await flush();
+    btn('Add size M to bag').click();
+    await new Promise((res) => setTimeout(res, 400));
+    expect(q('.ccf-sf-err').textContent).toBe('Size M is sold out right now.');
   });
 });

@@ -204,6 +204,22 @@ describe('card on the product page', () => {
   });
 });
 
+describe('preview like the storefront size advisor', () => {
+  it('Product page view shows the card without the drawer; steps show the Size advisor drawer', async () => {
+    const { container } = render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByLabelText('Recommended size');
+    expect(container.querySelector('.sfp-drawer')).not.toBeNull();
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('Size advisor');
+    expect(container.querySelector('.sfp-strip .is-you')).toHaveTextContent('M');
+    fireEvent.click(screen.getByRole('button', { name: 'Product page' }));
+    expect(container.querySelector('.sfp-drawer')).toBeNull();
+    expect(container.querySelector('.sfp-card')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Step 1' }));
+    expect(container.querySelector('.sfp-live-size')).toHaveTextContent('M');
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('Womenswear');
+  });
+});
+
 describe('preview design', () => {
   it('view tabs, Desktop / Mobile, progress, inches, fit meter', async () => {
     apiSend.mockResolvedValue({ size: 'M', reasons: [{ area: 'chest', status: 'snug' }] });
@@ -219,7 +235,7 @@ describe('preview design', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Step 1' }));
     expect(container.querySelectorAll('.sfp-progress span.on')).toHaveLength(1);
-    expect(screen.getByTestId('preview-frame')).toHaveTextContent('162 cm');
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('162cm');
     fireEvent.click(screen.getByRole('button', { name: 'in' }));
     expect(screen.getByTestId('preview-frame')).toHaveTextContent('5′ 4″');
 
