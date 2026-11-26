@@ -94,7 +94,7 @@ export const SAMPLE_SHOPPER = {
 };
 const VIEWS = [[1, 'Step 1'], [2, 'Step 2'], [3, 'Result']];
 
-export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth }) {
+export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth, highlight = null }) {
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
   const gender = genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
@@ -103,6 +103,8 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const view = viewProp || ownView;
   const setView = onViewChange || setOwnView;
   const t = (k, size) => advisorText(settings.texts, k, size);
+  // ' is-hl' on the part of the preview that the field being edited changes.
+  const hl = (...keys) => (highlight && keys.includes(highlight.key) ? ' is-hl' : '');
   const opt = { ...ADVISOR_OPTION_DEFAULTS, ...(settings.options || {}) };
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -154,13 +156,13 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const card = !genders.length ? (
     <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the card.</p>
   ) : (
-    <div className="sfp-card">
+    <div className={`sfp-card${hl('productTag')}`}>
       <span className="sfp-icon"><Ruler /></span>
       <span className="sfp-copy">
-        <span className="sfp-card-title">{settings.cardTitle || 'Not sure about your size?'}</span>
-        <span className="sfp-card-sub">{settings.cardText || '3 quick questions · takes 20 seconds'}</span>
+        <span className={`sfp-card-title${hl('cardTitle')}`}>{settings.cardTitle || 'Not sure about your size?'}</span>
+        <span className={`sfp-card-sub${hl('cardText')}`}>{settings.cardText || '3 quick questions · takes 20 seconds'}</span>
       </span>
-      <span className={ctaClass} style={{ borderRadius: ctaRadius(settings.buttonRadius) }}>
+      <span className={ctaClass + hl('buttonText', 'accentColor', 'buttonStyle', 'buttonRadius')} style={{ borderRadius: ctaRadius(settings.buttonRadius) }}>
         {settings.buttonText || 'Find my size'} →
       </span>
     </div>
@@ -169,7 +171,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const drawer = genders.length > 0 && (
     <div className="sfp-drawer">
       <div className="sfp-grab" />
-      <div className="sfp-dtop"><span className="sfp-brand">{t('advisorTitle')}</span><span className="sfp-x" aria-hidden="true">×</span></div>
+      <div className="sfp-dtop"><span className={`sfp-brand${hl('advisorTitle')}`}>{t('advisorTitle')}</span><span className="sfp-x" aria-hidden="true">×</span></div>
       <div className="sfp-scroll">
         <div className="sfp-product"><span className="sfp-thumb" /><span><b>Cotton Kurta</b><small>₹1,299</small></span></div>
         <div className="sfp-progress" aria-hidden="true">{[1, 2, 3].map((i) => <span key={i} className={i <= view ? 'on' : ''} />)}</div>
@@ -177,30 +179,30 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
 
         {view === 1 && (
           <>
-            <p className="sfp-title">{t('step1Title')}</p>
-            <p className="sfp-lede">{t('step1Text')}</p>
+            <p className={`sfp-title${hl('step1Title')}`}>{t('step1Title')}</p>
+            <p className={`sfp-lede${hl('step1Text')}`}>{t('step1Text')}</p>
             {genders.length > 1 && (
               <div className="sfp-seg">
-                {genders.map((g) => <span key={g} className={gender === g ? 'on' : ''}>{g === 'men' ? t('menLabel') : t('womenLabel')}</span>)}
+                {genders.map((g) => <span key={g} className={(gender === g ? 'on' : '') + hl(g === 'men' ? 'menLabel' : 'womenLabel', 'chart')}>{g === 'men' ? t('menLabel') : t('womenLabel')}</span>)}
               </div>
             )}
             <div className="sfp-measure">
               <div className="sfp-figure"><Figure heightCm={sample.heightCm} weightKg={sample.weightKg} /></div>
               <div className="sfp-fields">
                 <div className="sfp-field">
-                  <div className="sfp-flabel"><span>Height</span><span className="sfp-unit"><span className={hUnit === 'cm' ? 'on' : ''}>cm</span><span className={hUnit === 'ft' ? 'on' : ''}>ft/in</span></span></div>
+                  <div className="sfp-flabel"><span>Height</span><span className={`sfp-unit${hl('unit')}`}><span className={hUnit === 'cm' ? 'on' : ''}>cm</span><span className={hUnit === 'ft' ? 'on' : ''}>ft/in</span></span></div>
                   <div className="sfp-value">{hParts[0]}{hParts[1] && <small>{hParts[1]}</small>}</div>
                   <div className="sfp-ctrl"><i>−</i><div className="sfp-track"><span style={{ width: `${heightPct}%` }} /><b style={{ left: `${heightPct}%` }} /></div><i>+</i></div>
                 </div>
                 <div className="sfp-field">
-                  <div className="sfp-flabel"><span>Weight</span><span className="sfp-unit"><span className={wUnit === 'kg' ? 'on' : ''}>kg</span><span className={wUnit === 'lb' ? 'on' : ''}>lb</span></span></div>
+                  <div className="sfp-flabel"><span>Weight</span><span className={`sfp-unit${hl('unit')}`}><span className={wUnit === 'kg' ? 'on' : ''}>kg</span><span className={wUnit === 'lb' ? 'on' : ''}>lb</span></span></div>
                   <div className="sfp-value">{wParts[0]}<small>{wParts[1]}</small></div>
                   <div className="sfp-ctrl"><i>−</i><div className="sfp-track"><span style={{ width: `${weightPct}%` }} /><b style={{ left: `${weightPct}%` }} /></div><i>+</i></div>
                 </div>
               </div>
             </div>
             {opt.liveEstimate && (
-              <div className="sfp-live">
+              <div className={`sfp-live${hl('liveEstimate')}`}>
                 <span><b>Live estimate</b><small>Refines in the next steps</small></span>
                 <span className="sfp-live-size">{result ? result.size : '—'}</span>
               </div>
@@ -210,8 +212,8 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
 
         {view === 2 && (
           <>
-            <p className="sfp-title">{t('step2Title')}</p>
-            <p className="sfp-lede">{t('step2Text')}</p>
+            <p className={`sfp-title${hl('step2Title')}`}>{t('step2Title')}</p>
+            <p className={`sfp-lede${hl('step2Text')}`}>{t('step2Text')}</p>
             <p className="sfp-q">Body shape</p>
             <div className="sfp-cards">
               {SHAPES.map(([v, l, h]) => <span key={v} className={v === 'average' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
@@ -221,7 +223,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
               {FITS.map(([v, l, h]) => <span key={v} className={v === 'regular' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
             </div>
             {opt.rememberSize && (
-              <div className="sfp-check">
+              <div className={`sfp-check${hl('rememberSize')}`}>
                 <span><b>Remember my size</b><small>We save only the size, never your height or weight.</small></span>
                 <i className="sfp-switch" aria-hidden="true" />
               </div>
@@ -231,12 +233,12 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
 
         {view === 3 && (
           <div className="sfp-result">
-            <p className="sfp-title">{t('resultTitle')}</p>
+            <p className={`sfp-title${hl('resultTitle')}`}>{t('resultTitle')}</p>
             {error && <p className="sfp-err" role="alert">{error}</p>}
             {!error && !result && <p className="sfp-muted sfp-loading">{loading ? 'Working out the size…' : 'Add sizes to this chart to see a result.'}</p>}
             {!error && result && (
               <>
-                <div className="sfp-ring">
+                <div className={`sfp-ring${hl('chart')}`}>
                   <svg width="112" height="112" viewBox="0 0 132 132" aria-hidden="true">
                     <circle cx="66" cy="66" r="60" fill="none" stroke="#EEECE8" strokeWidth="6" />
                     <circle cx="66" cy="66" r="60" fill="none" stroke={good ? '#2F6B4F' : '#B7791F'} strokeWidth="6" strokeLinecap="round"
@@ -258,14 +260,14 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
                       : <span className={x.status === 'right' ? 'sfp-ok' : 'sfp-bad'}>{REASON_TEXT[x.status]}</span>}
                   </div>
                 ))}
-                <div className="sfp-strip" aria-hidden="true">
+                <div className={`sfp-strip${hl('chart')}`} aria-hidden="true">
                   {sizes.map((s) => <span key={s} className={s === String(result.size) ? 'is-you' : ''}>{s}</span>)}
                 </div>
                 <div className="sfp-meter" aria-hidden="true">
                   <div className="sfp-meter-bar"><span style={{ left: `${meterPosition(result.reasons)}%` }} /></div>
                   <div className="sfp-meter-labels"><span>Snug</span><span>Just right</span><span>Roomy</span></div>
                 </div>
-                <div className="sfp-links">{opt.sizeChart && <span>View size chart</span>}<span>Edit details</span></div>
+                <div className="sfp-links">{opt.sizeChart && <span className={hl('sizeChart').trim()}>View size chart</span>}<span>Edit details</span></div>
               </>
             )}
           </div>
@@ -276,8 +278,8 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
         {view === 2 && <div className="sfp-actions"><span className="sfp-ghost">Back</span><span className="sfp-main">See my size</span></div>}
         {view === 3 && (result
           ? (opt.addToBag
-            ? <div className="sfp-actions"><span className="sfp-ghost">Select {result.size}</span><span className="sfp-main">{t('addToBagText', result.size)}</span></div>
-            : <span className="sfp-main">Select size {result.size}</span>)
+            ? <div className={`sfp-actions${hl('addToBag')}`}><span className="sfp-ghost">Select {result.size}</span><span className={`sfp-main${hl('addToBagText')}`}>{t('addToBagText', result.size)}</span></div>
+            : <span className={`sfp-main${hl('addToBag')}`}>Select size {result.size}</span>)
           : <span className="sfp-main">Close</span>)}
         {view === 1 && <p className="sfp-privacy">Used only to work out your size — never saved by the store.</p>}
       </div>
@@ -291,6 +293,8 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
         <div>
           <p className="sfp-label">Live preview</p>
           <p className="sfp-muted">
+            {highlight && highlight.label ? <span className="sfp-editing" data-testid="preview-editing"><i aria-hidden="true" />Editing: {highlight.label}</span> : null}
+            {highlight && highlight.label ? ' · ' : null}
             {show === 'card' ? 'Showing the card you are editing' : show === 'advisor' ? 'Showing the size preview you are editing' : 'View only · updates as you edit, before you save'}
             {show !== 'both' && onShowBoth && (
               <> · <button type="button" className="sfp-both" onClick={onShowBoth}>Show both</button></>
@@ -364,6 +368,13 @@ const CSS = `
 .sfp-stage.is-mobile .sfp-frame{max-width:340px;border-radius:18px 18px 0 0}
 .sfp-stage.is-mobile .sfp-grab{display:block;width:34px;height:4px;border-radius:4px;background:#D9D6D0;margin:7px auto 0}
 .sfp-static{pointer-events:none;user-select:none}
+.sfp .is-hl{outline:2px solid #4F46E5;outline-offset:3px;border-radius:6px;box-shadow:0 0 0 6px rgba(79,70,229,.14);animation:sfp-hl 1.6s ease-in-out infinite;transition:outline-color .2s}
+@keyframes sfp-hl{0%,100%{box-shadow:0 0 0 5px rgba(79,70,229,.16)}50%{box-shadow:0 0 0 9px rgba(79,70,229,.04)}}
+.sfp .sfp-seg span.is-hl{outline-offset:-4px;border-radius:2px;animation:none;box-shadow:inset 0 0 0 6px rgba(79,70,229,.18)}
+.sfp .sfp-seg span.on.is-hl{outline-color:#A5B4FC}
+@media (prefers-reduced-motion:reduce){.sfp .is-hl{animation:none}}
+.sfp-editing{display:inline-flex;align-items:center;gap:5px;color:#4338CA;font-weight:600}
+.sfp-editing i{width:7px;height:7px;border-radius:50%;background:#4F46E5;box-shadow:0 0 0 3px rgba(79,70,229,.2)}
 .sfp-warn{font-size:12px;color:#B45309;background:#FFFBEB;border-radius:8px;padding:8px 10px}
 
 /* size card on the page */

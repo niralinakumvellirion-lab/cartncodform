@@ -47,6 +47,7 @@ export default function SizeFinderScreen({ shop }) {
   const [previewView, setPreviewView] = useState(3);
   // Which preview to show: the part the seller is editing ('card' / 'advisor'), or 'both'.
   const [previewShow, setPreviewShow] = useState('both');
+  const [highlight, setHighlight] = useState(null); // { key, label } of the field being edited
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -124,8 +125,16 @@ export default function SizeFinderScreen({ shop }) {
   }
 
   // Clicking or typing anywhere in a section shows that section's preview on the right.
+  // The field (data-hl) being edited is highlighted in the preview, which also jumps to its step.
   function focusArea(area) {
-    const pick = () => setPreviewShow(area);
+    const pick = (e) => {
+      setPreviewShow(area);
+      const el = e.target && e.target.closest ? e.target.closest('[data-hl]') : null;
+      if (!el) { setHighlight(null); return; }
+      const key = el.getAttribute('data-hl');
+      setHighlight({ key, label: el.getAttribute('data-hl-label') || '' });
+      if (HL_VIEW[key]) setPreviewView(HL_VIEW[key]);
+    };
     return { onFocusCapture: pick, onMouseDownCapture: pick };
   }
 
@@ -137,7 +146,7 @@ export default function SizeFinderScreen({ shop }) {
   // Small field components share the page state; focusing one shows that step in the preview.
   function textField(label, k, view, hint) {
     return (
-      <label key={k} style={ui.field}>{label}
+      <label key={k} style={ui.field} data-hl={k} data-hl-label={label}>{label}
         <input
           type="text"
           maxLength={ADVISOR_TEXT_MAX[k]}
@@ -155,7 +164,7 @@ export default function SizeFinderScreen({ shop }) {
   function optionSwitch(k, view, title, text) {
     const on = options[k];
     return (
-      <div key={k} style={ui.toggleRow}>
+      <div key={k} style={ui.toggleRow} data-hl={k} data-hl-label={title.replace(/[“”]/g, '')}>
         <span>
           <span style={ui.sectionTitle}>{title}</span>
           <span style={{ ...ui.sectionText, fontSize: 12.5 }}>{text}</span>
@@ -219,7 +228,7 @@ export default function SizeFinderScreen({ shop }) {
       ) : (<>
       <section style={ui.card} {...focusArea('both')}>
         <SectionHead icon="pin" title="Where it shows" text="Every product that has a Size option. Add a tag to show it only on some products." />
-        <label style={ui.field}>Only on products with this tag (optional)
+        <label style={ui.field} data-hl="productTag" data-hl-label="Product tag">Only on products with this tag (optional)
           <input
             type="text"
             maxLength={60}
@@ -234,7 +243,7 @@ export default function SizeFinderScreen({ shop }) {
 
       <section style={ui.card} aria-label="Card on the product page" {...focusArea('card')}>
         <SectionHead icon="card" title="Card on the product page" text="Shoppers see this card right under the Size buttons. The preview updates as you type." />
-        <label style={ui.field}>Heading
+        <label style={ui.field} data-hl="cardTitle" data-hl-label="Card heading">Heading
           <input
             type="text"
             maxLength={60}
@@ -245,7 +254,7 @@ export default function SizeFinderScreen({ shop }) {
             aria-label="Card heading"
           />
         </label>
-        <label style={ui.field}>Small text
+        <label style={ui.field} data-hl="cardText" data-hl-label="Card small text">Small text
           <input
             type="text"
             maxLength={80}
@@ -256,7 +265,7 @@ export default function SizeFinderScreen({ shop }) {
             aria-label="Card small text"
           />
         </label>
-        <label style={ui.field}>Button text
+        <label style={ui.field} data-hl="buttonText" data-hl-label="Button text">Button text
           <input
             type="text"
             maxLength={40}
@@ -266,7 +275,7 @@ export default function SizeFinderScreen({ shop }) {
             aria-label="Button text"
           />
         </label>
-        <label style={ui.field}>Button colour
+        <label style={ui.field} data-hl="accentColor" data-hl-label="Button colour">Button colour
           <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
               type="color"
@@ -285,7 +294,7 @@ export default function SizeFinderScreen({ shop }) {
             />
           </span>
         </label>
-        <div style={ui.field}>
+        <div style={ui.field} data-hl="buttonStyle" data-hl-label="Button style">
           <span>Button style</span>
           <span style={{ display: 'flex', gap: 4, marginTop: 6 }} role="group" aria-label="Button style">
             {[['filled', 'Filled'], ['outline', 'Outline'], ['soft', 'Soft']].map(([v, l]) => (
@@ -301,7 +310,7 @@ export default function SizeFinderScreen({ shop }) {
             ))}
           </span>
         </div>
-        <div style={ui.field}>
+        <div style={ui.field} data-hl="buttonRadius" data-hl-label="Button corners">
           <span style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Button corners</span>
             <span style={ui.muted}>{radiusLabel(settings.buttonRadius)}</span>
@@ -389,7 +398,7 @@ export default function SizeFinderScreen({ shop }) {
       <section style={ui.card} aria-label="Size charts" {...focusArea('advisor')}>
         <div style={ui.row}>
           <SectionHead icon="chart" title="Size charts" text="Body measurements for each size." />
-          <span style={ui.seg} role="group" aria-label="Unit">
+          <span style={ui.seg} role="group" aria-label="Unit" data-hl="unit" data-hl-label="Unit (cm / in)">
             {['cm', 'in'].map((u) => (
               <button key={u} type="button" aria-pressed={unit === u} onClick={() => set({ unit: u })} style={unit === u ? ui.segOn : ui.segOff}>
                 {u}
@@ -401,14 +410,14 @@ export default function SizeFinderScreen({ shop }) {
           Starter Indian charts are filled in — change them to match your clothes. Leave a chart empty to hide{" "}
           {texts.womenLabel} or {texts.menLabel} from shoppers.
         </p>
-        <div style={ui.row} role="group" aria-label="Chart">
+        <div style={ui.row} role="group" aria-label="Chart" data-hl="chart" data-hl-label="Size chart">
           {[{ v: 'women', l: texts.womenLabel }, { v: 'men', l: texts.menLabel }].map((g) => (
             <button key={g.v} type="button" aria-pressed={gender === g.v} onClick={() => setGender(g.v)} style={gender === g.v ? ui.segOn : ui.segOff}>
               {g.l} ({(settings.charts[g.v] || []).length})
             </button>
           ))}
         </div>
-        <table style={ui.table} aria-label={`${gender} size chart`}>
+        <table style={ui.table} aria-label={`${gender} size chart`} data-hl="chart" data-hl-label="Size chart">
           <thead>
             <tr>
               <th style={ui.th}>Size</th>
@@ -442,7 +451,7 @@ export default function SizeFinderScreen({ shop }) {
           </tbody>
         </table>
         {rows.length < 12 && (
-          <button type="button" style={ui.add} onClick={() => setRows([...rows, { size: '', chest: '', waist: '', length: '' }])}>
+          <button type="button" style={ui.add} data-hl="chart" data-hl-label="Size chart" onClick={() => setRows([...rows, { size: '', chest: '', waist: '', length: '' }])}>
             + Add a size
           </button>
         )}
@@ -470,7 +479,7 @@ export default function SizeFinderScreen({ shop }) {
           className="sf-fit"
           style={{ transform: `scale(${fit.scale})`, width: `${100 / fit.scale}%` }}
         >
-          <SizeFinderPreview shop={shop} settings={settings} gender={gender} view={previewView} onViewChange={setPreviewView} show={previewShow} onShowBoth={() => setPreviewShow('both')} />
+          <SizeFinderPreview shop={shop} settings={settings} gender={gender} view={previewView} onViewChange={setPreviewView} show={previewShow} onShowBoth={() => setPreviewShow('both')} highlight={highlight} />
         </div>
       </aside>
       )}
@@ -478,6 +487,9 @@ export default function SizeFinderScreen({ shop }) {
     </div>
   );
 }
+
+// Fields whose preview part lives on one step: editing them opens that step.
+const HL_VIEW = { chart: 3, unit: 1 };
 
 const ICONS = {
   pin: <path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,

@@ -325,6 +325,63 @@ describe('preview follows the section being edited', () => {
   });
 });
 
+describe('preview highlights the field being edited', () => {
+  const lit = () => Array.from(document.querySelectorAll('.sfp .is-hl'));
+
+  it('nothing at first; each field lights up its own part, with an "Editing" note', async () => {
+    await renderScreen();
+    await screen.findByLabelText('Recommended size');
+    expect(lit()).toHaveLength(0);
+    expect(screen.queryByTestId('preview-editing')).toBeNull();
+
+    fireEvent.focus(screen.getByLabelText('Card heading'));
+    expect(lit().map((e) => e.className)).toEqual([expect.stringContaining('sfp-card-title')]);
+    expect(screen.getByTestId('preview-editing')).toHaveTextContent('Editing: Card heading');
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Outline' }));
+    expect(lit()).toHaveLength(1);
+    expect(lit()[0].className).toContain('sfp-cta');
+    expect(screen.getByTestId('preview-editing')).toHaveTextContent('Button style');
+
+    fireEvent.focus(screen.getByLabelText('Button corner radius in px'));
+    expect(lit()[0].className).toContain('sfp-cta');
+
+    // Womenswear button → only the Womenswear chip in step 1
+    fireEvent.focus(screen.getByLabelText('Womenswear button'));
+    expect(lit()).toHaveLength(1);
+    expect(lit()[0]).toHaveTextContent('Womenswear');
+    expect(screen.getByTestId('preview-editing')).toHaveTextContent('Womenswear button');
+    fireEvent.focus(screen.getByLabelText('Menswear button'));
+    expect(lit()[0]).toHaveTextContent('Menswear');
+
+    fireEvent.focus(screen.getByLabelText('Step 2 heading'));
+    expect(lit()[0].className).toContain('sfp-title');
+    expect(lit()[0]).toHaveTextContent('How do you like it to fit?');
+  });
+
+  it('switches and the size chart light up their parts and open the right step', async () => {
+    await renderScreen();
+    await screen.findByLabelText('Recommended size');
+
+    fireEvent.mouseDown(screen.getByRole('switch', { name: 'Show Remember my size' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Show Remember my size' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Show Remember my size' })); // back on
+    expect(lit()[0].className).toContain('sfp-check');
+
+    fireEvent.focus(screen.getByLabelText('Row 1 Chest'));
+    await screen.findByLabelText('Recommended size'); // jumped to the result
+    expect(lit().map((e) => e.className.split(' ')[0])).toEqual(['sfp-ring', 'sfp-strip']);
+    expect(screen.getByTestId('preview-editing')).toHaveTextContent('Size chart');
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'in' }));
+    expect(lit().every((e) => e.className.includes('sfp-unit'))).toBe(true);
+    expect(lit()).toHaveLength(2);
+
+    fireEvent.focus(screen.getByLabelText('Product tag')); // the whole card
+    expect(lit()[0].className).toContain('sfp-card');
+  });
+});
+
 describe('preview design', () => {
   it('view tabs, Desktop / Mobile, progress, inches, fit meter', async () => {
     apiSend.mockResolvedValue({ size: 'M', reasons: [{ area: 'chest', status: 'snug' }] });
