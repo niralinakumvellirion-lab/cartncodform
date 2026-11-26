@@ -4792,6 +4792,27 @@
     }
   }
 
+  // Public hook for other app blocks (Back in stock "Notify me"): asks for permission if needed,
+  // saves the subscription like the normal prompt does, and resolves with this browser's FCM token.
+  window.CCFPush = window.CCFPush || {};
+  window.CCFPush.canPush = function () {
+    return ('Notification' in window) && ('serviceWorker' in navigator) &&
+      Notification.permission !== 'denied' && typeof firebase !== 'undefined';
+  };
+  window.CCFPush.subscribe = function () {
+    if (!window.CCFPush.canPush()) return Promise.reject(new Error('unsupported'));
+    var ask = Notification.permission === 'granted' ? 'granted' : Notification.requestPermission();
+    return Promise.resolve(ask).then(function (p) {
+      if (p !== 'granted') throw new Error('denied');
+      return registerSW();
+    }).then(function (reg) {
+      return getToken(reg);
+    }).then(function (token) {
+      // A failed save must not lose the token — the restock request carries it anyway.
+      return Promise.resolve(saveToken(token)).then(function () { return token; }, function () { return token; });
+    });
+  };
+
   // test-only hook: exposed when window.__ccf_test is set BEFORE script load
   if (typeof window !== 'undefined' && window.__ccf_test) {
     window.__ccf_test.showBirthdayStep = ccfShowBirthdayStep;

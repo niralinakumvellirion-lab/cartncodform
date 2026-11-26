@@ -34,6 +34,8 @@ const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
 const ComplianceRequest = require('../models/ComplianceRequest');
 const SizeFinderConfig = require('../models/SizeFinderConfig');
+const RestockConfig = require('../models/RestockConfig');
+const RestockRequest = require('../models/RestockRequest');
 
 // All models that hold shopDomain-scoped data and must be wiped on shop/redact.
 // ALLOWLIST (intentionally excluded): SubscriptionEvent (billing analytics, no shopper PII),
@@ -56,6 +58,8 @@ const SHOP_REDACT_MODELS = [
   PurchaseRecord,
   Review,
   ReviewSettings,
+  RestockConfig,
+  RestockRequest,
   ReviewVote,
   ScheduledJob,
   ShopWeights,
@@ -820,6 +824,14 @@ async function runCustomersRedact(cr) {
       await PurchaseRecord.deleteMany({ shopDomain, $or: reviewOr });
     }
     if (customerId) await ReviewVote.deleteMany({ shopDomain, customerId });
+
+    // Back in stock requests (email / push token of this shopper).
+    const restockOr = [];
+    if (customerId) restockOr.push({ customerId });
+    if (customerEmail) restockOr.push({ email: customerEmail.toLowerCase() });
+    if (profileIds.length) restockOr.push({ profileId: { $in: profileIds } });
+    if (pushTokens.length) restockOr.push({ pushToken: { $in: pushTokens } });
+    if (restockOr.length) await RestockRequest.deleteMany({ shopDomain, $or: restockOr });
 
     await ComplianceRequest.updateOne(
       { _id: cr._id },

@@ -1,0 +1,35 @@
+{% comment %}
+  "Back in stock" — a "Notify me" box shown when the chosen variant is sold out. Settings come from the
+  app at runtime (ccf-restock.js, App Proxy /apps/cartncodform/restock). Push needs the
+  "ShopiReachBoost AI Push" app embed on; email works without it.
+{% endcomment %}
+{%- if product -%}
+<div
+  id="ccf-bis-root"
+  data-shop="{{ shop.permanent_domain | escape }}"
+  data-product-id="{{ product.id }}"
+  data-product-title="{{ product.title | escape }}"
+  data-product-handle="{{ product.handle | escape }}"
+  {%- if product.featured_image %} data-product-image="{{ product.featured_image | image_url: width: 300 }}"{% endif %}
+  data-selected="{{ product.selected_or_first_available_variant.id }}"
+  data-design-mode="{{ request.design_mode }}"
+>
+  <script type="application/json" class="ccf-bis-variants">[
+    {%- for v in product.variants -%}
+      {"id":{{ v.id }},"title":{{ v.title | json }},"available":{{ v.available }}}{% unless forloop.last %},{% endunless %}
+    {%- endfor -%}
+  ]</script>
+</div>
+<script src="{{ 'ccf-restock.js' | asset_url }}" defer></script>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Back in stock",
+  "target": "section",
+  "enabled_on": {
+    "templates": ["product"]
+  },
+  "settings": []
+}
+{% endschema %}

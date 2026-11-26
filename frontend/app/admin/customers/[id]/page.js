@@ -31,6 +31,7 @@ function CustomerDetailContent() {
         <a href="/admin/cod" rel="cod">Cash on delivery</a>
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/size-finder" rel="size-finder">Find my size</a>
+        <a href="/admin/back-in-stock" rel="back-in-stock">Back in stock</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
         <a href="/admin/plans" rel="plans">Plans</a>
         <a href="/admin/email-templates" rel="email-templates">Email templates</a>

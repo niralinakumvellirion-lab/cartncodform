@@ -343,4 +343,40 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
   }
 }
 
-module.exports = { sendPushToStore, sendPushToCustomers, buildClickUrl, buildCustomerSubscriptionQuery };
+/**
+ * Send one notification to the given storefront tokens only (e.g. "back in stock" alerts a shopper
+ * asked for on one device). Stale tokens are pruned like other sends. Tokens are never logged.
+ */
+async function sendPushToTokens(shopDomain, tokens, { title, body, url, imageUrl } = {}) {
+  const shop = String(shopDomain || '').trim().toLowerCase();
+  const list = (tokens || []).filter(Boolean);
+  if (!firebaseReady) return { success: false, error: 'Firebase Admin not configured', sent: 0 };
+  if (!list.length) return { success: true, sent: 0 };
+  try {
+    const link = url || `https://${shop}`;
+    const icon = imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png';
+    const response = await sendMulticastInBatches({
+      data: { url: link, imageUrl: imageUrl || '', title, body, icon },
+      webpush: {
+        headers: { Urgency: 'high' },
+        notification: { title, body, icon, image: imageUrl || undefined, badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png' },
+        fcm_options: { link },
+      },
+    }, list);
+    const codes = [];
+    for (let i = 0; i < response.responses.length; i++) {
+      const r = response.responses[i];
+      if (!r.success) {
+        const code = (r.error && r.error.code) || 'unknown';
+        codes.push(code);
+        if (isStaleCode(code)) await handleStaleToken(list[i], shop);
+      }
+    }
+    return { success: true, sent: response.successCount, errorCode: codes[0] || null };
+  } catch (err) {
+    console.error('[push] Error (tokens):', err.message);
+    return { success: false, error: err.message, sent: 0 };
+  }
+}
+
+module.exports = { sendPushToStore, sendPushToCustomers, sendPushToTokens, buildClickUrl, buildCustomerSubscriptionQuery };

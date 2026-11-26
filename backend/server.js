@@ -197,8 +197,10 @@ app.use('/api/dashboard/:shopDomain/channels/email', require('./routes/emailUser
 app.use('/api/dashboard/:shopDomain/channels/whatsapp', require('./routes/whatsappUsers'));
 app.use('/apps/cartncodform/reviews', require('./routes/reviewsProxy'));
 app.use('/apps/cartncodform/size-finder', require('./routes/sizeFinderProxy'));
+app.use('/apps/cartncodform/restock', require('./routes/restockProxy'));
 app.use('/apps/cartncodform', proxyRouter);
 app.use('/api/size-finder', require('./routes/sizeFinder'));
+app.use('/api/restock', require('./routes/restock'));
 // Public unsubscribe endpoint — no requireAuth, has its own rate limiter.
 const unsubscribeRouter = require('./routes/unsubscribe');
 app.use('/api/unsubscribe', unsubscribeRouter);
@@ -1272,6 +1274,12 @@ async function runPollerTick() {
     await recheckPaidPlans();
   } catch (err) {
     console.error('[billing] daily plan check error (poller tick):', err.message);
+  }
+  try {
+    // Back in stock: check waited-for variants and send alerts (own 5-min gate per shop inside).
+    await require('./services/restock').processRestock();
+  } catch (err) {
+    console.error('[restock] poller tick error:', err.message);
   }
   try {
     await cleanupExpiredPrepaidCodes();
