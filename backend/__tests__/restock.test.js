@@ -119,6 +119,11 @@ describe('settings helpers', () => {
     expect(m.text).toContain('Kurta (M) is back in stock');
     expect(m.text).toContain('ccf_src=whatsapp&ccf_job=j9');
     expect(m.waLink.startsWith('https://wa.me/919876543210?text=')).toBe(true);
+    // Priority bar split: WhatsApp %, email gets the rest; clamped 0-100; default 80/20.
+    expect(R.publicSettings(null).percent).toEqual({ whatsapp: 80, email: 20 });
+    expect(R.publicSettings({ whatsappPercent: 65 }).percent).toEqual({ whatsapp: 65, email: 35 });
+    expect(R.sanitizeSettings({ whatsappPercent: 140 }).whatsappPercent).toBe(100);
+    expect(R.publicSettings(null).texts.meterLabel).toBe('Alert priority');
   });
 
   test('public settings hide the message texts', () => {

@@ -19,6 +19,8 @@ const TEXT_DEFAULTS = {
   whatsappHint: 'Fastest · we message you the moment it’s back',
   emailHint: 'We email you within {time} of the restock',
   whatsappMessage: 'Hi! Good news — {product} ({size}) is back in stock. Get it here before it sells out: {link}',
+  meterLabel: 'Alert priority',
+  partialText: 'Done! Add {next} too to reach 100%.',
 };
 
 const TEXT_MAX = {
@@ -35,7 +37,12 @@ const TEXT_MAX = {
   whatsappHint: 80,
   emailHint: 80,
   whatsappMessage: 300,
+  meterLabel: 40,
+  partialText: 90,
 };
+
+// Priority shown to shoppers when both WhatsApp and email are on: WhatsApp adds this %, email the rest.
+const DEFAULT_WHATSAPP_PERCENT = 80;
 
 // Minutes email alerts wait after a restock (WhatsApp and push go first).
 const EMAIL_DELAYS = [0, 30, 60, 120, 240, 720];
@@ -75,6 +82,12 @@ function cleanDelay(v) {
   return EMAIL_DELAYS.includes(n) ? n : DEFAULT_EMAIL_DELAY;
 }
 
+function cleanPercent(v) {
+  const n = Math.round(Number(v));
+  if (v === '' || v === null || v === undefined || !Number.isFinite(n)) return DEFAULT_WHATSAPP_PERCENT;
+  return Math.min(100, Math.max(0, n));
+}
+
 /** "1 hour", "30 minutes", "a few minutes" — for the email hint's {time}. */
 function delayLabel(minutes) {
   const m = cleanDelay(minutes);
@@ -108,6 +121,7 @@ function sanitizeSettings(input) {
     enabled: s.enabled === true,
     channels,
     emailDelayMinutes: cleanDelay(s.emailDelayMinutes),
+    whatsappPercent: cleanPercent(s.whatsappPercent),
     accentColor: accent,
     buttonRadius: cleanRadius(s.buttonRadius),
     texts: cleanTexts(s.texts),
@@ -122,6 +136,7 @@ function withDefaults(doc) {
     enabled: d.enabled === true,
     channels: { push: ch.push !== false, email: ch.email !== false, whatsapp: ch.whatsapp === true },
     emailDelayMinutes: cleanDelay(d.emailDelayMinutes),
+    whatsappPercent: cleanPercent(d.whatsappPercent),
     accentColor: HEX_RE.test(d.accentColor || '') ? d.accentColor : '#111827',
     buttonRadius: cleanRadius(d.buttonRadius),
     texts: { ...TEXT_DEFAULTS, ...cleanTexts(d.texts) },
@@ -134,6 +149,8 @@ function publicSettings(doc) {
   return {
     enabled: s.enabled,
     channels: s.channels,
+    // Priority bar (only when WhatsApp and email are both on).
+    percent: { whatsapp: s.whatsappPercent, email: 100 - s.whatsappPercent },
     accentColor: s.accentColor,
     buttonRadius: s.buttonRadius,
     texts: {
@@ -145,6 +162,8 @@ function publicSettings(doc) {
       whatsappPlaceholder: s.texts.whatsappPlaceholder || TEXT_DEFAULTS.whatsappPlaceholder,
       whatsappHint: s.texts.whatsappHint || TEXT_DEFAULTS.whatsappHint,
       emailHint: (s.texts.emailHint || TEXT_DEFAULTS.emailHint).replace(/\{time\}/g, delayLabel(s.emailDelayMinutes)),
+      meterLabel: s.texts.meterLabel || TEXT_DEFAULTS.meterLabel,
+      partialText: s.texts.partialText || TEXT_DEFAULTS.partialText,
     },
   };
 }

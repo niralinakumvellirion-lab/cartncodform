@@ -13,6 +13,8 @@ const RestockConfigSchema = new mongoose.Schema({
   },
   // Email alerts wait this long after the restock (WhatsApp + push go first).
   emailDelayMinutes: { type: Number, default: 60 },
+  // Priority bar: WhatsApp adds this %, email adds the rest (shown when both are on).
+  whatsappPercent: { type: Number, default: 80 },
   accentColor: { type: String, default: '#111827' },
   buttonRadius: { type: Number, default: 8 },
   texts: { type: mongoose.Schema.Types.Mixed, default: {} },

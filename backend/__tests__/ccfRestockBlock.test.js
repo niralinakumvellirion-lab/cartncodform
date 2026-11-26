@@ -68,15 +68,19 @@ const okPush = () => ({ canPush: () => true, subscribe: jest.fn().mockResolvedVa
 afterEach(() => { timers.forEach((t) => clearInterval(t)); timers = []; });
 afterAll(() => { delete global.fetch; delete window.CCFPush; });
 
+const submit = (sel) => q(sel).closest('form').dispatchEvent(new Event('submit', { cancelable: true }));
+const pct = () => q('.ccf-bis-pct') && q('.ccf-bis-pct').textContent;
+
 describe('ccf-restock.js', () => {
-  test('sold-out variant → box with title, push button and email form, placed after the buy form', async () => {
+  test('sold-out variant → box with title, email card and browser-alert link, placed after the buy form', async () => {
     await load({ push: okPush() });
     expect(box().hidden).toBe(false);
     expect(q('.ccf-bis-title').textContent).toBe('Sold out in this size');
-    expect(q('.ccf-bis-push').textContent).toMatch(/Notify me/);
-    expect(q('.ccf-bis-or').textContent).toBe('or by email');
-    expect(q('.ccf-bis-input').placeholder).toBe('Your email');
+    expect(q('.ccf-bis-em .ccf-bis-cardtitle').textContent).toBe('Email');
+    expect(q('.ccf-bis-email').placeholder).toBe('Your email');
+    expect(q('.ccf-bis-pushlink').textContent).toMatch(/Also get a browser alert/);
     expect(q('form[action="/cart/add"]:not([id])').nextElementSibling.id).toBe('ccf-bis-root');
+    expect(q('.ccf-bis-meter')).toBeNull(); // no WhatsApp → no priority bar
   });
 
   test('available variant → hidden; switching to the sold-out one shows it', async () => {
@@ -93,22 +97,14 @@ describe('ccf-restock.js', () => {
     expect(box()).toBeNull();
   });
 
-  test('no push embed → email only, with the main button style', async () => {
+  test('email only: bad email caught locally; good one sent → success line', async () => {
     await load();
-    expect(q('.ccf-bis-push')).toBeNull();
-    expect(q('.ccf-bis-or')).toBeNull();
-    expect(q('.ccf-bis-form').classList.contains('is-only')).toBe(true);
-  });
-
-  test('email: bad email is caught locally; good one is sent and shows the success line', async () => {
-    await load();
-    q('.ccf-bis-input').value = 'nope';
-    q('.ccf-bis-form').dispatchEvent(new Event('submit', { cancelable: true }));
+    q('.ccf-bis-email').value = 'nope';
+    submit('.ccf-bis-email');
     expect(q('.ccf-bis-err').hidden).toBe(false);
     expect(posts).toHaveLength(0);
-
-    q('.ccf-bis-input').value = 'asha@example.com';
-    q('.ccf-bis-form').dispatchEvent(new Event('submit', { cancelable: true }));
+    q('.ccf-bis-email').value = 'asha@example.com';
+    submit('.ccf-bis-email');
     await flush();
     expect(posts[0]).toMatchObject({
       channel: 'email', email: 'asha@example.com', productId: '111', variantId: '2', variantTitle: 'M',
@@ -117,19 +113,26 @@ describe('ccf-restock.js', () => {
     expect(q('.ccf-bis-done').textContent).toBe('Done! We’ll tell you when M is back.');
   });
 
-  test('remembers the request: reload shows the success line', async () => {
+  test('remembers the sign-up: reload shows the success line', async () => {
     await load();
-    q('.ccf-bis-input').value = 'asha@example.com';
-    q('.ccf-bis-form').dispatchEvent(new Event('submit', { cancelable: true }));
+    q('.ccf-bis-email').value = 'asha@example.com';
+    submit('.ccf-bis-email');
     await flush();
     await load({ keepStorage: true });
     expect(q('.ccf-bis-done')).not.toBeNull();
-    expect(q('.ccf-bis-input')).toBeNull();
+    expect(q('.ccf-bis-email')).toBeNull();
   });
 
-  test('push: subscribes through CCFPush and sends the token', async () => {
+  test('older saved list of ids still counts as signed up', async () => {
+    localStorage.setItem('ccf_bis_demo.myshopify.com', JSON.stringify(['2']));
+    await load({ keepStorage: true });
+    expect(q('.ccf-bis-done')).not.toBeNull();
+  });
+
+  test('push only: full button; subscribes through CCFPush and sends the token', async () => {
     const push = okPush();
-    await load({ push });
+    await load({ push, settings: { ...SETTINGS, channels: { push: true, email: false } } });
+    expect(q('.ccf-bis-btn.ccf-bis-push')).not.toBeNull();
     q('.ccf-bis-push').click();
     await flush();
     expect(push.subscribe).toHaveBeenCalled();
@@ -147,13 +150,13 @@ describe('ccf-restock.js', () => {
 
   test('server error message is shown', async () => {
     await load({ subscribeResult: { ok: false, error: 'Too many tries.' } });
-    q('.ccf-bis-input').value = 'asha@example.com';
-    q('.ccf-bis-form').dispatchEvent(new Event('submit', { cancelable: true }));
+    q('.ccf-bis-email').value = 'asha@example.com';
+    submit('.ccf-bis-email');
     await flush();
     expect(q('.ccf-bis-err').textContent).toBe('Too many tries.');
   });
 
-  test('push channel off in settings → no push button even with the embed', async () => {
+  test('push channel off in settings → no push option even with the embed', async () => {
     await load({ push: okPush(), settings: { ...SETTINGS, channels: { push: false, email: true } } });
     expect(q('.ccf-bis-push')).toBeNull();
   });
@@ -165,39 +168,79 @@ describe('ccf-restock.js', () => {
   });
 });
 
-describe('WhatsApp option', () => {
+describe('WhatsApp + email priority bar', () => {
   const WA = {
     ...SETTINGS,
     channels: { push: true, email: true, whatsapp: true },
-    texts: { ...SETTINGS.texts, whatsappPlaceholder: 'WhatsApp number', whatsappHint: 'Fastest · we message you the moment it’s back', emailHint: 'We email you within 1 hour of the restock' },
+    percent: { whatsapp: 80, email: 20 },
+    texts: {
+      ...SETTINGS.texts, whatsappPlaceholder: 'WhatsApp number', whatsappHint: 'Fastest · we message you the moment it’s back',
+      emailHint: 'We email you within 1 hour of the restock', meterLabel: 'Alert priority', partialText: 'Done! Add {next} too to reach 100%.',
+    },
   };
 
-  test('WhatsApp comes first with a Fastest badge; email shows its later-timing hint', async () => {
+  test('cards: WhatsApp first (Fastest, +80%), email second (+20%, later hint); bar at 0%', async () => {
     await load({ settings: WA, push: okPush() });
-    const opts = Array.from(document.querySelectorAll('.ccf-bis-body > *')).map((e) => e.className);
-    expect(opts[0]).toContain('ccf-bis-wa');
+    const cards = Array.from(document.querySelectorAll('.ccf-bis-card')).map((c) => c.className);
+    expect(cards[0]).toContain('ccf-bis-wa');
+    expect(cards[1]).toContain('ccf-bis-em');
     expect(q('.ccf-bis-wa .ccf-bis-badge').textContent).toBe('Fastest');
-    expect(q('.ccf-bis-wa .ccf-bis-hint').textContent).toMatch(/moment it’s back/);
-    expect(q('.ccf-bis-push').textContent).toMatch(/browser alert/);
+    expect(q('.ccf-bis-wa .ccf-bis-chip').textContent).toBe('+80%');
+    expect(q('.ccf-bis-em .ccf-bis-chip').textContent).toBe('+20%');
     expect(q('.ccf-bis-em .ccf-bis-hint').textContent).toBe('We email you within 1 hour of the restock');
+    expect(pct()).toBe('0%');
+    expect(q('.ccf-bis-meter').getAttribute('aria-valuenow')).toBe('0');
   });
 
-  test('bad number caught locally; good number sent as a WhatsApp request', async () => {
+  test('only WhatsApp → 80% + done, email card still offered; then email → 100% all set', async () => {
     await load({ settings: WA });
     q('.ccf-bis-phone').value = '123';
-    q('.ccf-bis-wa form').dispatchEvent(new Event('submit', { cancelable: true }));
+    submit('.ccf-bis-phone');
     expect(q('.ccf-bis-err').textContent).toBe('Enter a valid WhatsApp number');
-    expect(posts).toHaveLength(0);
     q('.ccf-bis-phone').value = '98765 43210';
-    q('.ccf-bis-wa form').dispatchEvent(new Event('submit', { cancelable: true }));
+    submit('.ccf-bis-phone');
     await flush();
     expect(posts[0]).toMatchObject({ channel: 'whatsapp', phone: '9876543210', variantId: '2' });
-    expect(q('.ccf-bis-done')).not.toBeNull();
+    expect(pct()).toBe('80%');
+    expect(q('.ccf-bis-partial').textContent).toBe('Done! Add email too to reach 100%.');
+    expect(q('.ccf-bis-phone')).toBeNull();
+    expect(q('.ccf-bis-email')).not.toBeNull();
+
+    q('.ccf-bis-email').value = 'asha@example.com';
+    submit('.ccf-bis-email');
+    await flush();
+    expect(pct()).toBe('100%');
+    expect(box().classList.contains('is-full')).toBe(true);
+    expect(q('.ccf-bis-done').textContent).toBe('Done! We’ll tell you when M is back.');
+    expect(q('.ccf-bis-card')).toBeNull();
   });
 
-  test('WhatsApp off → no number box', async () => {
+  test('only email → 20% + done, WhatsApp card still offered', async () => {
+    await load({ settings: WA });
+    q('.ccf-bis-email').value = 'asha@example.com';
+    submit('.ccf-bis-email');
+    await flush();
+    expect(pct()).toBe('20%');
+    expect(q('.ccf-bis-partial').textContent).toBe('Done! Add WhatsApp too to reach 100%.');
+    expect(q('.ccf-bis-phone')).not.toBeNull();
+  });
+
+  test('the seller’s split is used (e.g. 70 / 30) and remembered after reload', async () => {
+    const s = { ...WA, percent: { whatsapp: 70, email: 30 } };
+    await load({ settings: s });
+    expect(q('.ccf-bis-wa .ccf-bis-chip').textContent).toBe('+70%');
+    q('.ccf-bis-phone').value = '9876543210';
+    submit('.ccf-bis-phone');
+    await flush();
+    await load({ settings: s, keepStorage: true });
+    expect(pct()).toBe('70%');
+    expect(q('.ccf-bis-phone')).toBeNull();
+  });
+
+  test('WhatsApp off → no number box, no bar', async () => {
     await load();
     expect(q('.ccf-bis-phone')).toBeNull();
+    expect(q('.ccf-bis-meter')).toBeNull();
   });
 });
 

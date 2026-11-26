@@ -183,11 +183,12 @@ describe('Back in stock screen', () => {
 });
 
 describe('preview', () => {
-  test('email-only box uses the main button style; no push card', () => {
+  test('email-only box: an email card, no bar, no push link, no WhatsApp bubble', () => {
     render(<BackInStockPreview settings={{ ...SETTINGS, channels: { push: false, email: true } }} />);
-    expect(document.querySelector('.bp-form.is-only')).not.toBeNull();
+    expect(document.querySelector('.bp-em-card')).not.toBeNull();
+    expect(document.querySelector('.bp-meter')).toBeNull();
+    expect(document.querySelector('.bp-pushlink')).toBeNull();
     expect(document.querySelector('.bp-notif')).toBeNull();
-    expect(document.querySelector('.bp-or')).toBeNull();
   });
 });
 
@@ -206,16 +207,19 @@ describe('WhatsApp (seller sends by hand) and email wait', () => {
     expect(s.emailDelayMinutes).toBe(120);
   });
 
-  test('preview: WhatsApp first with Fastest, email note shows the wait, WhatsApp bubble', async () => {
+  test('preview: WhatsApp card first (Fastest, +80%), email card (+20%, wait note), bar at 0%, WhatsApp bubble', async () => {
     mockApi({ ...SETTINGS, channels: { push: true, email: true, whatsapp: true }, emailDelayMinutes: 240 });
     await renderScreen();
     const box = screen.getByTestId('preview-box');
     expect(within(box).getByText('Fastest')).toBeInTheDocument();
+    expect(within(box).getByText('+80%')).toBeInTheDocument();
+    expect(within(box).getByText('+20%')).toBeInTheDocument();
     expect(within(box).getByText('WhatsApp number')).toBeInTheDocument();
     expect(within(box).getByText('We email you within 4 hours of the restock')).toBeInTheDocument();
-    expect(within(box).getByText(/Get a browser alert/)).toBeInTheDocument();
-    const order = Array.from(box.querySelectorAll('.bp-body > *')).map((e) => e.className.split(' ')[0]);
-    expect(order[0]).toBe('bp-opt'); // WhatsApp row first
+    expect(within(box).getByText(/Also get a browser alert/)).toBeInTheDocument();
+    expect(within(screen.getByTestId('preview-meter')).getByText('0%')).toBeInTheDocument();
+    const cards = Array.from(box.querySelectorAll('.bp-card')).map((e) => e.className);
+    expect(cards[0]).toContain('bp-wa-card');
     const msgs = screen.getByTestId('preview-messages');
     expect(within(msgs).getByText(/Cotton Kurta \(M\) is back in stock/)).toBeInTheDocument();
     expect(within(msgs).getByText('WhatsApp · you send it')).toBeInTheDocument();
@@ -237,5 +241,56 @@ describe('WhatsApp (seller sends by hand) and email wait', () => {
   test('no WhatsApp alerts → no card', async () => {
     await renderScreen();
     expect(screen.queryByRole('region', { name: 'Send on WhatsApp' })).toBeNull();
+  });
+});
+
+describe('priority split (WhatsApp % / email %)', () => {
+  const BOTH = { ...SETTINGS, channels: { push: true, email: true, whatsapp: true }, whatsappPercent: 80 };
+
+  test('preview states: WhatsApp only 80% + add-email note, email only 20%, both 100% all set', async () => {
+    mockApi(BOTH);
+    await renderScreen();
+    const states = screen.getByRole('group', { name: 'Box state' });
+    fireEvent.click(within(states).getByRole('button', { name: 'WhatsApp · 80%' }));
+    const box = screen.getByTestId('preview-box');
+    expect(within(screen.getByTestId('preview-meter')).getByText('80%')).toBeInTheDocument();
+    expect(within(box).getByText('Done! Add email too to reach 100%.')).toBeInTheDocument();
+    expect(box.querySelector('.bp-wa-card')).toBeNull();
+    expect(box.querySelector('.bp-em-card')).not.toBeNull();
+
+    fireEvent.click(within(states).getByRole('button', { name: 'Email · 20%' }));
+    expect(within(screen.getByTestId('preview-meter')).getByText('20%')).toBeInTheDocument();
+    expect(within(box).getByText('Done! Add WhatsApp too to reach 100%.')).toBeInTheDocument();
+
+    fireEvent.click(within(states).getByRole('button', { name: 'Both · 100%' }));
+    expect(within(screen.getByTestId('preview-meter')).getByText('100%')).toBeInTheDocument();
+    expect(within(box).getByText('Done! We’ll tell you when M is back.')).toBeInTheDocument();
+    expect(box.querySelector('.bp-card')).toBeNull();
+  });
+
+  test('changing the split: WhatsApp % box and email % box stay at 100 together; saved', async () => {
+    mockApi(BOTH);
+    await renderScreen();
+    fireEvent.change(screen.getByLabelText('WhatsApp priority in percent'), { target: { value: '70' } });
+    expect(screen.getByLabelText('Email priority in percent')).toHaveValue(30);
+    expect(within(screen.getByTestId('preview-box')).getByText('+70%')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Email priority in percent'), { target: { value: '40' } });
+    expect(screen.getByLabelText('WhatsApp priority in percent')).toHaveValue(60);
+    fireEvent.change(screen.getByLabelText('Priority bar label'), { target: { value: 'Your priority' } });
+    const s = await saved();
+    expect(s.whatsappPercent).toBe(60);
+    expect(s.texts.meterLabel).toBe('Your priority');
+  });
+
+  test('editing the split shows the WhatsApp-only state in the preview', async () => {
+    mockApi(BOTH);
+    await renderScreen();
+    fireEvent.focus(screen.getByLabelText('WhatsApp priority in percent'));
+    expect(within(screen.getByTestId('preview-meter')).getByText('80%')).toBeInTheDocument();
+  });
+
+  test('split control only when WhatsApp and email are both on', async () => {
+    await renderScreen(); // WhatsApp off
+    expect(screen.queryByLabelText('WhatsApp priority in percent')).toBeNull();
   });
 });

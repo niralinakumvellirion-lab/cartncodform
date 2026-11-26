@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import ThemeBlockSetup from '../components/ThemeBlockSetup';
-import BackInStockPreview, { RESTOCK_TEXT_DEFAULTS, RESTOCK_TEXT_MAX, EMAIL_DELAYS } from './BackInStockPreview';
+import BackInStockPreview, { RESTOCK_TEXT_DEFAULTS, RESTOCK_TEXT_MAX, EMAIL_DELAYS, whatsappPercent } from './BackInStockPreview';
 import { fitScale } from './SizeFinder';
 
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
@@ -141,6 +141,7 @@ export default function BackInStockScreen({ shop }) {
       const key = el.getAttribute('data-hl');
       setHighlight({ key, label: el.getAttribute('data-hl-label') || '' });
       if (key === 'successText') setBoxView('done');
+      else if (key === 'whatsappPercent' || key === 'partialText') setBoxView('wa');
       else if (area === 'box') setBoxView('form');
     };
     return { onFocusCapture: pick, onMouseDownCapture: pick };
@@ -187,6 +188,7 @@ export default function BackInStockScreen({ shop }) {
 
   const ov = overview && !overview.failed ? overview : null;
   const corner = cornerValue(settings.buttonRadius);
+  const waPct = whatsappPercent(settings.whatsappPercent);
 
   return (
     <div style={ui.page}>
@@ -334,6 +336,42 @@ export default function BackInStockScreen({ shop }) {
                   </select>
                 </label>
               )}
+              {channels.whatsapp && channels.email && (
+                <div style={{ ...ui.field, marginTop: 4 }} data-hl="whatsappPercent" data-hl-label="Priority split">
+                  <span>Priority split</span>
+                  <span style={ui.hint}>Shoppers see a priority bar. WhatsApp adds this much, email adds the rest. Both = 100%.</span>
+                  <div style={ui.split} aria-hidden="true">
+                    <span style={{ ...ui.splitWa, width: `${waPct}%` }}>{waPct >= 12 ? `WhatsApp ${waPct}%` : ''}</span>
+                    <span style={{ ...ui.splitEm, width: `${100 - waPct}%` }}>{100 - waPct >= 12 ? `Email ${100 - waPct}%` : ''}</span>
+                  </div>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <input
+                      type="range" min={0} max={100} step={5} value={waPct}
+                      onChange={(e) => set({ whatsappPercent: Number(e.target.value) })}
+                      style={{ flex: 1, minWidth: 140, maxWidth: 300, accentColor: '#1FA855' }}
+                      aria-label="WhatsApp priority"
+                    />
+                    <span style={ui.pctBox}>
+                      WhatsApp
+                      <input
+                        type="number" min={0} max={100} step={1} value={waPct}
+                        onChange={(e) => { if (e.target.value !== '') set({ whatsappPercent: whatsappPercent(e.target.value) }); }}
+                        style={{ ...ui.input, width: 64, textAlign: 'center' }}
+                        aria-label="WhatsApp priority in percent"
+                      />%
+                    </span>
+                    <span style={ui.pctBox}>
+                      Email
+                      <input
+                        type="number" min={0} max={100} step={1} value={100 - waPct}
+                        onChange={(e) => { if (e.target.value !== '') set({ whatsappPercent: 100 - whatsappPercent(e.target.value) }); }}
+                        style={{ ...ui.input, width: 64, textAlign: 'center' }}
+                        aria-label="Email priority in percent"
+                      />%
+                    </span>
+                  </span>
+                </div>
+              )}
               <p style={{ ...ui.group, marginTop: 16 }}>Words</p>
               <div className="bis-grid2">
                 {textField('Heading', 'boxTitle')}
@@ -346,6 +384,8 @@ export default function BackInStockScreen({ shop }) {
                   {textField('WhatsApp box hint', 'whatsappPlaceholder')}
                   {textField('WhatsApp note', 'whatsappHint')}
                   {channels.email && textField('Email note', 'emailHint', { hint: '{time} becomes your email wait, e.g. 1 hour' })}
+                  {channels.email && textField('Priority bar label', 'meterLabel')}
+                  {channels.email && textField('After one option', 'partialText', { hint: '{next} becomes WhatsApp or email' })}
                 </div>
               )}
               {textField('After sign-up', 'successText', { hint: '{size} becomes the size, e.g. M' })}
@@ -551,6 +591,10 @@ const ui = {
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { textAlign: 'left', padding: '8px 6px', fontSize: 11, color: '#616161', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid #E3E3E3' },
   td: { padding: '8px 6px', fontSize: 13, borderBottom: '1px solid #F1F1F1' },
+  split: { display: 'flex', height: 26, borderRadius: 8, overflow: 'hidden', maxWidth: 420, fontSize: 11.5, fontWeight: 600, margin: '4px 0' },
+  splitWa: { background: '#1FA855', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'width .3s', whiteSpace: 'nowrap', overflow: 'hidden' },
+  splitEm: { background: '#E2E8F0', color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'width .3s', whiteSpace: 'nowrap', overflow: 'hidden' },
+  pctBox: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#303030' },
   waBtn: { background: '#1FA855', color: '#fff', borderRadius: 8, padding: '7px 12px', fontSize: 13, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' },
   linkBtn: { background: 'none', border: 'none', padding: 0, color: '#2C6ECB', fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' },

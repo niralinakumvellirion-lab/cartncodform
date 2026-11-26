@@ -17,12 +17,20 @@ export const RESTOCK_TEXT_DEFAULTS = {
   whatsappHint: 'Fastest · we message you the moment it’s back',
   emailHint: 'We email you within {time} of the restock',
   whatsappMessage: 'Hi! Good news — {product} ({size}) is back in stock. Get it here before it sells out: {link}',
+  meterLabel: 'Alert priority',
+  partialText: 'Done! Add {next} too to reach 100%.',
 };
 export const RESTOCK_TEXT_MAX = {
   boxTitle: 60, boxText: 90, buttonText: 30, emailPlaceholder: 40, successText: 90,
   pushTitle: 65, pushBody: 160, emailSubject: 90, emailBody: 400,
   whatsappPlaceholder: 40, whatsappHint: 80, emailHint: 80, whatsappMessage: 300,
+  meterLabel: 40, partialText: 90,
 };
+/** WhatsApp share of the priority bar (0–100, default 80); email gets the rest. */
+export function whatsappPercent(v) {
+  const n = Math.round(Number(v));
+  return v === '' || v == null || !Number.isFinite(n) ? 80 : Math.min(100, Math.max(0, n));
+}
 // Mirrors backend EMAIL_DELAYS / delayLabel.
 export const EMAIL_DELAYS = [[0, 'Right away'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours'], [720, '12 hours']];
 export function delayLabel(minutes) {
@@ -40,7 +48,9 @@ export function restockText(texts, key, sample = SAMPLE, extra = {}) {
     .replace(/\{product\}/g, sample.product)
     .replace(/\{size\}/g, sample.size)
     .replace(/\{time\}/g, extra.time || '1 hour')
-    .replace(/\{link\}/g, extra.link || 'your-store.com/products/cotton-kurta');
+    .replace(/\{link\}/g, extra.link || 'your-store.com/products/cotton-kurta')
+    .replace(/\{next\}/g, extra.next || 'email')
+    .replace(/\{percent\}/g, extra.percent != null ? String(extra.percent) : '80');
 }
 export function restockRadius(v) {
   const n = Number(v);
@@ -49,7 +59,24 @@ export function restockRadius(v) {
 }
 
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
-const BOX_VIEWS = [['form', 'Before'], ['done', 'After sign-up']];
+
+
+const CHAT = <path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.5 8.5 0 1 1 21 11.5z" />;
+const MAIL = <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>;
+function Icon({ children, size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+  );
+}
+
+/** Box states the preview can show. With WhatsApp + email: 0%, WhatsApp only, email only, both. */
+export function boxViews(channels, waPct) {
+  const ch = channels || {};
+  if (ch.whatsapp && ch.email) {
+    return [['form', 'Before · 0%'], ['wa', `WhatsApp · ${waPct}%`], ['em', `Email · ${100 - waPct}%`], ['done', 'Both · 100%']];
+  }
+  return [['form', 'Before'], ['done', 'After sign-up']];
+}
 
 function Bell() {
   return (
@@ -74,10 +101,25 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
   const t = (k) => restockText(settings.texts, k, SAMPLE, { time: delayLabel(settings.emailDelayMinutes) });
   const hl = (...keys) => (highlight && keys.includes(highlight.key) ? ' is-hl' : '');
   const ch = settings.channels || { push: true, email: true, whatsapp: false };
-  const many = [ch.whatsapp, ch.push, ch.email].filter(Boolean).length > 1;
+  const waPct = whatsappPercent(settings.whatsappPercent);
+  const meterOn = !!(ch.whatsapp && ch.email);
+  const views = boxViews(ch, waPct);
+  const view = views.some(([v]) => v === boxView) ? boxView : 'form';
+  const got = meterOn
+    ? { whatsapp: view === 'wa' || view === 'done', email: view === 'em' || view === 'done' }
+    : { all: view === 'done' };
+  const pct = (got.whatsapp ? waPct : 0) + (got.email ? 100 - waPct : 0);
+  const complete = meterOn ? got.whatsapp && got.email : got.all;
+  const partial = meterOn && !complete && pct > 0;
+  const tx = (k) => restockText(settings.texts, k, SAMPLE, {
+    time: delayLabel(settings.emailDelayMinutes), next: got.whatsapp ? 'email' : 'WhatsApp', percent: pct,
+  });
+  const showWa = ch.whatsapp && !got.whatsapp;
+  const showEmail = ch.email && !got.email;
+  const pushAlone = ch.push && !ch.whatsapp && !ch.email;
 
   const box = (
-    <div className={`bp-box${hl('accentColor')}`}>
+    <div className={`bp-box${meterOn && complete ? ' is-full' : ''}${hl('accentColor')}`}>
       <div className="bp-head">
         <span className="bp-icon"><Bell /></span>
         <span className="bp-copy">
@@ -85,13 +127,25 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
           <span className={`bp-text${hl('boxText')}`}>{t('boxText')}</span>
         </span>
       </div>
-      {boxView === 'done' ? (
+      {meterOn && (
+        <div className={`bp-meter${hl('whatsappPercent', 'meterLabel')}`} data-testid="preview-meter">
+          <div className="bp-meterrow"><span>{t('meterLabel')}</span><span className="bp-pct">{pct}%</span></div>
+          <div className="bp-bar"><span className="bp-fill" style={{ width: `${pct}%` }} /></div>
+        </div>
+      )}
+      {complete ? (
         <div className={`bp-done${hl('successText')}`}><span aria-hidden="true">✓</span>{t('successText')}</div>
-      ) : (
+      ) : (<>
+        {partial && <div className={`bp-done bp-partial${hl('partialText')}`}><span aria-hidden="true">✓</span>{tx('partialText')}</div>}
         <div className="bp-body">
-          {ch.whatsapp && (
-            <div className={`bp-opt${hl('channelWhatsapp')}`}>
-              {many && <span className="bp-optlabel">WhatsApp <span className="bp-badge">Fastest</span></span>}
+          {showWa && (
+            <div className={`bp-card bp-wa-card${hl('channelWhatsapp')}`}>
+              <div className="bp-cardhead">
+                <span className="bp-chan bp-chan-wa"><Icon>{CHAT}</Icon></span>
+                <span className="bp-cardtitle">WhatsApp</span>
+                <span className="bp-badge">Fastest</span>
+                {meterOn && <span className={`bp-chip${hl('whatsappPercent')}`}>+{waPct}%</span>}
+              </div>
               <div className="bp-form">
                 <span className={`bp-input${hl('whatsappPlaceholder')}`} style={{ borderRadius: radius }}>{t('whatsappPlaceholder')}</span>
                 <span className={`bp-btn bp-wabtn${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
@@ -99,24 +153,25 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
               <span className={`bp-hint${hl('whatsappHint')}`}>{t('whatsappHint')}</span>
             </div>
           )}
-          {ch.push && ch.whatsapp && <span className="bp-or">or</span>}
-          {ch.push && (
-            <span className={`bp-btn${ch.whatsapp ? ' bp-ghost' : ''}${hl('buttonText', 'buttonRadius', 'channelPush')}`} style={{ borderRadius: radius }}>
-              <Bell /> {ch.whatsapp ? 'Get a browser alert' : t('buttonText')}
-            </span>
-          )}
-          {ch.email && (ch.push || ch.whatsapp) && <span className="bp-or">or by email</span>}
-          {ch.email && (
-            <div className={`bp-opt${hl('channelEmail')}`}>
-              <div className={`bp-form${ch.push || ch.whatsapp ? '' : ' is-only'}`}>
+          {showEmail && (
+            <div className={`bp-card bp-em-card${hl('channelEmail')}`}>
+              <div className="bp-cardhead">
+                <span className="bp-chan bp-chan-em"><Icon>{MAIL}</Icon></span>
+                <span className="bp-cardtitle">Email</span>
+                {meterOn && <span className={`bp-chip bp-chip-em${hl('whatsappPercent')}`}>+{100 - waPct}%</span>}
+              </div>
+              <div className="bp-form">
                 <span className={`bp-input${hl('emailPlaceholder')}`} style={{ borderRadius: radius }}>{t('emailPlaceholder')}</span>
-                <span className={`bp-btn bp-btn2${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
+                <span className={`bp-btn${hl('buttonText', 'buttonRadius')}`} style={{ borderRadius: radius }}>{t('buttonText')}</span>
               </div>
               {ch.whatsapp && <span className={`bp-hint${hl('emailHint', 'emailDelayMinutes')}`}>{t('emailHint')}</span>}
             </div>
           )}
+          {ch.push && (pushAlone
+            ? <span className={`bp-btn${hl('buttonText', 'buttonRadius', 'channelPush')}`} style={{ borderRadius: radius }}><Bell /> {t('buttonText')}</span>
+            : <span className={`bp-pushlink${hl('channelPush')}`}><Icon size={13}><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></Icon> Also get a browser alert</span>)}
         </div>
-      )}
+      </>)}
     </div>
   );
 
@@ -146,8 +201,8 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
             <div className="bp-blockhead">
               <p className="bp-blocktitle"><span>1</span>Box on the product page</p>
               <div className="bp-seg" role="group" aria-label="Box state">
-                {BOX_VIEWS.map(([v, l]) => (
-                  <button key={v} type="button" aria-pressed={boxView === v} onClick={() => setBoxView(v)}>{l}</button>
+                {views.map(([v, l]) => (
+                  <button key={v} type="button" aria-pressed={view === v} onClick={() => setBoxView(v)}>{l}</button>
                 ))}
               </div>
             </div>
@@ -246,13 +301,30 @@ const CSS = `
 .bp-sizes span.on{border-color:#1A1A1A;box-shadow:inset 0 0 0 1px #1A1A1A;text-decoration:line-through;color:#8A8A8A}
 .bp-sizes span.out{text-decoration:line-through;color:#B0B0B0}
 .bp-soldout{display:block;text-align:center;padding:9px;border:1px solid #E3E3E3;border-radius:8px;font-size:13px;color:#8A8A8A;background:#FAFAFA}
-.bp-box{margin-top:12px;padding:12px;border:1px solid color-mix(in srgb,var(--bp-accent) 22%,transparent);border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--bp-accent) 5%,#fff),color-mix(in srgb,var(--bp-accent) 1%,#fff))}
-.bp-head{display:flex;gap:10px;align-items:flex-start}
-.bp-icon{width:34px;height:34px;border-radius:50%;background:#fff;color:var(--bp-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px color-mix(in srgb,var(--bp-accent) 20%,transparent)}
+.bp-box{margin-top:12px;padding:13px;border:1px solid #E7E5E4;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.04),0 6px 18px rgba(16,24,40,.05)}
+.bp-head{display:flex;gap:10px;align-items:center}
+.bp-icon{width:36px;height:36px;border-radius:10px;background:color-mix(in srgb,var(--bp-accent) 8%,#fff);color:var(--bp-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.bp-meter{margin-top:11px}
+.bp-meterrow{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;font-weight:600;color:#3F3F46}
+.bp-pct{font-size:12.5px;font-weight:750;color:#15803D}
+.bp-bar{height:7px;margin-top:5px;border-radius:999px;background:#F1F1EF;overflow:hidden}
+.bp-fill{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#4ADE80,#16A34A);transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.bp-box.is-full .bp-fill{background:linear-gradient(90deg,#22C55E,#15803D);box-shadow:0 0 8px rgba(34,197,94,.45)}
+.bp-card{border:1px solid #EAEAEA;border-radius:10px;background:#FCFCFB;padding:10px;display:flex;flex-direction:column;gap:7px}
+.bp-cardhead{display:flex;align-items:center;gap:7px}
+.bp-chan{width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.bp-chan-wa{background:#E7F8EE;color:#15803D}
+.bp-chan-em{background:color-mix(in srgb,var(--bp-accent) 8%,#fff);color:var(--bp-accent)}
+.bp-cardtitle{font-size:12.5px;font-weight:600}
+.bp-chip{margin-left:auto;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;border:1px solid #BBF7D0;background:#F0FDF4;color:#15803D}
+.bp-chip-em{border-color:#E2E8F0;background:#F8FAFC;color:#475569}
+.bp-pushlink{align-self:center;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--bp-accent)}
+.bp-partial{border:1px solid #BBF7D0}
 .bp-copy{display:flex;flex-direction:column;gap:1px;min-width:0}
 .bp-title{font-size:13.5px;font-weight:600}
 .bp-text{font-size:12px;color:#6B6B6B}
 .bp-body{margin-top:10px;display:flex;flex-direction:column;gap:7px}
+.bp-form .bp-btn{flex-shrink:0}
 .bp-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;background:var(--bp-accent);color:#fff;border:1px solid var(--bp-accent);font-size:13px;font-weight:600}
 .bp-or{display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#8A8A8A}
 .bp-or::before,.bp-or::after{content:"";flex:1;height:1px;background:#E5E5E5}
