@@ -273,6 +273,14 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
   // ── Main ───────────────────────────────────────────────────────────────────
 
   var STEP_NAMES = { 1: 'Measurements', 2: 'Your fit', 3: 'Your size' };
+  // Words the store can change in the admin (same defaults as the backend).
+  var TEXT_DEFAULTS = {
+    womenLabel: 'Womenswear', menLabel: 'Menswear', advisorTitle: 'Size advisor',
+    step1Title: 'Let’s find your fit', step1Text: 'Two measurements, about ten seconds.',
+    step2Title: 'How do you like it to fit?', step2Text: 'Two quick choices make the size more accurate.',
+    resultTitle: 'Your size', addToBagText: 'Add size {size} to bag',
+  };
+  var OPTION_DEFAULTS = { liveEstimate: true, rememberSize: true, addToBag: true, sizeChart: true };
   var REASON_TEXT = { right: 'Right for your fit', snug: 'A little snug', roomy: 'A little roomy' };
   var H_MIN = 140, H_MAX = 200, W_MIN = 40, W_MAX = 130;
 
@@ -299,6 +307,15 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
     var accent = /^#[0-9A-Fa-f]{6}$/.test(settings.accentColor || '') ? settings.accentColor : '#111827';
     var genders = Array.isArray(settings.genders) ? settings.genders : [];
     if (!genders.length) { root.remove(); return; }
+    var texts = settings.texts || {};
+    function T(key, size) {
+      var v = typeof texts[key] === 'string' && texts[key].trim() ? texts[key].trim() : TEXT_DEFAULTS[key];
+      return size == null ? v : v.replace(/\{size\}/g, size);
+    }
+    var opts = {};
+    Object.keys(OPTION_DEFAULTS).forEach(function (k) {
+      opts[k] = settings.options && typeof settings.options[k] === 'boolean' ? settings.options[k] : OPTION_DEFAULTS[k];
+    });
 
     injectStyles(accent);
     var STORE_KEY = 'ccf_size_answers_' + shop;
@@ -340,7 +357,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
     panel.hidden = true;
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-modal', 'true');
-    panel.setAttribute('aria-label', 'Size advisor');
+    panel.setAttribute('aria-label', T('advisorTitle'));
     document.body.appendChild(overlay);
     document.body.appendChild(panel);
 
@@ -381,7 +398,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       requestAnimationFrame(function () { overlay.classList.add('is-open'); panel.classList.add('is-open'); });
       var x = panel.querySelector('.ccf-sf-close');
       if (x) try { x.focus({ preventScroll: true }); } catch (e) {}
-      if (state.step === 1 && !state.live) estimateSoon(0);
+      if (state.step === 1 && !state.live && opts.liveEstimate) estimateSoon(0);
     }
     function close() {
       overlay.classList.remove('is-open');
@@ -502,6 +519,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       if (s) s.textContent = state.live || '—';
     }
     function estimateSoon(ms) {
+      if (!opts.liveEstimate) return;
       clearTimeout(liveTimer);
       state.liveBusy = true;
       paintLive();
@@ -622,7 +640,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       figureBox = null;
       panel.appendChild(el('div', 'ccf-sf-grab'));
       var head = el('div', 'ccf-sf-top');
-      head.appendChild(el('p', 'ccf-sf-brand', 'Size advisor'));
+      head.appendChild(el('p', 'ccf-sf-brand', T('advisorTitle')));
       head.appendChild(button('ccf-sf-close', '×', close, 'Close'));
       panel.appendChild(head);
 
@@ -664,11 +682,11 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       }
 
       if (state.step === 1) {
-        scroll.appendChild(el('h2', 'ccf-sf-title', 'Let’s find your fit'));
-        scroll.appendChild(el('p', 'ccf-sf-lede', 'Two measurements, about ten seconds.'));
+        scroll.appendChild(el('h2', 'ccf-sf-title', T('step1Title')));
+        scroll.appendChild(el('p', 'ccf-sf-lede', T('step1Text')));
         if (genders.length > 1) {
           scroll.appendChild(segmented(
-            genders.map(function (g) { return { value: g, label: g === 'men' ? 'Menswear' : 'Womenswear' }; }),
+            genders.map(function (g) { return { value: g, label: g === 'men' ? T('menLabel') : T('womenLabel') }; }),
             state.gender, function (v) { if (v !== state.gender) { state.gender = v; estimateSoon(200); } }, 'Womenswear or menswear'
           ));
         }
@@ -684,6 +702,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         m.appendChild(fields);
         scroll.appendChild(m);
 
+        if (opts.liveEstimate) {
         liveBox = el('div', 'ccf-sf-live');
         liveBox.setAttribute('aria-live', 'polite');
         var lt = el('div');
@@ -693,6 +712,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         liveBox.appendChild(el('span', 'ccf-sf-live-size', state.live || '—'));
         scroll.appendChild(liveBox);
         paintLive();
+        }
 
         if (err) foot.appendChild(err);
         var a1 = el('div', 'ccf-sf-actions');
@@ -700,8 +720,8 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         foot.appendChild(a1);
         foot.appendChild(el('p', 'ccf-sf-privacy', 'Used only to work out your size — your height and weight are never saved by the store.'));
       } else if (state.step === 2) {
-        scroll.appendChild(el('h2', 'ccf-sf-title', 'How do you like it to fit?'));
-        scroll.appendChild(el('p', 'ccf-sf-lede', 'Two quick choices make the size more accurate.'));
+        scroll.appendChild(el('h2', 'ccf-sf-title', T('step2Title')));
+        scroll.appendChild(el('p', 'ccf-sf-lede', T('step2Text')));
         scroll.appendChild(el('p', 'ccf-sf-q', 'Body shape'));
         scroll.appendChild(cards([
           { value: 'slim', label: 'Slim', hint: 'Narrow frame' },
@@ -714,6 +734,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
           { value: 'regular', label: 'Regular', hint: 'Classic fit' },
           { value: 'relaxed', label: 'Relaxed', hint: 'Loose and easy' },
         ], state.fit, function (v) { state.fit = v; }, 'Preferred fit'));
+        if (opts.rememberSize) {
         var lbl = el('label', 'ccf-sf-check');
         var txt = el('span');
         txt.appendChild(el('b', null, 'Remember my size'));
@@ -726,6 +747,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         cb.addEventListener('change', function () { state.remember = cb.checked; });
         lbl.appendChild(cb);
         scroll.appendChild(lbl);
+        }
 
         if (err) foot.appendChild(err);
         var a2 = el('div', 'ccf-sf-actions');
@@ -738,7 +760,7 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         var r = state.result || {};
         var available = sells(r.size);
         var box = el('div', 'ccf-sf-result');
-        box.appendChild(el('h2', 'ccf-sf-title', 'Your size'));
+        box.appendChild(el('h2', 'ccf-sf-title', T('resultTitle')));
 
         var ring = el('div', 'ccf-sf-ring');
         var good = !r.outOfRange;
@@ -794,18 +816,18 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
         box.appendChild(el('p', 'ccf-sf-note', 'Based on your height, weight and answers, compared with this product’s size chart. It’s a guide, not a guarantee.'));
 
         var links = el('div', 'ccf-sf-links');
-        links.appendChild(button('ccf-sf-link', state.showChart ? 'Hide size chart' : 'View size chart', function () { state.showChart = !state.showChart; draw(); }));
+        if (opts.sizeChart) links.appendChild(button('ccf-sf-link', state.showChart ? 'Hide size chart' : 'View size chart', function () { state.showChart = !state.showChart; draw(); }));
         links.appendChild(button('ccf-sf-link', 'Edit details', function () { state.step = 1; state.result = null; state.error = ''; draw(); estimateSoon(0); }));
         box.appendChild(links);
-        if (state.showChart) box.appendChild(chartTable(state.gender, r.size));
+        if (opts.sizeChart && state.showChart) box.appendChild(chartTable(state.gender, r.size));
         scroll.appendChild(box);
 
         if (err) foot.appendChild(err);
         var a3 = el('div', 'ccf-sf-actions');
         if (available) {
-          if (addButton()) {
+          if (opts.addToBag && addButton()) {
             a3.appendChild(button('ccf-sf-btn', 'Select ' + r.size, function () { chooseSize(r.size, false); }, 'Select size ' + r.size + ' on the page'));
-            a3.appendChild(button('ccf-sf-btn ccf-sf-btn-main', 'Add size ' + r.size + ' to bag', function () { chooseSize(r.size, true); }));
+            a3.appendChild(button('ccf-sf-btn ccf-sf-btn-main', T('addToBagText', r.size), function () { chooseSize(r.size, true); }));
           } else {
             a3.appendChild(button('ccf-sf-btn ccf-sf-btn-main', 'Select size ' + r.size, function () { chooseSize(r.size, false); }));
           }

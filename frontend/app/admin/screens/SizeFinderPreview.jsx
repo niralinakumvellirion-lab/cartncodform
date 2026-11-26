@@ -8,6 +8,29 @@ const KG_PER_LB = 0.45359237;
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 const REASON_TEXT = { right: 'Right for your fit', snug: 'A little snug', roomy: 'A little roomy' };
 const STEP_NAMES = { 1: 'Measurements', 2: 'Your fit', 3: 'Your size' };
+
+/** Size advisor words the store can change — same defaults and limits as backend utils/sizeFinder.js. */
+export const ADVISOR_TEXT_DEFAULTS = {
+  womenLabel: 'Womenswear',
+  menLabel: 'Menswear',
+  advisorTitle: 'Size advisor',
+  step1Title: 'Let’s find your fit',
+  step1Text: 'Two measurements, about ten seconds.',
+  step2Title: 'How do you like it to fit?',
+  step2Text: 'Two quick choices make the size more accurate.',
+  resultTitle: 'Your size',
+  addToBagText: 'Add size {size} to bag',
+};
+export const ADVISOR_TEXT_MAX = {
+  womenLabel: 24, menLabel: 24, advisorTitle: 30, step1Title: 50, step1Text: 90,
+  step2Title: 50, step2Text: 90, resultTitle: 40, addToBagText: 40,
+};
+export const ADVISOR_OPTION_DEFAULTS = { liveEstimate: true, rememberSize: true, addToBag: true, sizeChart: true };
+/** Text with an empty value falling back to the default; {size} filled in. */
+export function advisorText(texts, key, size) {
+  const v = texts && typeof texts[key] === 'string' && texts[key].trim() ? texts[key].trim() : ADVISOR_TEXT_DEFAULTS[key];
+  return size == null ? v : v.replace(/\{size\}/g, size);
+}
 const SHAPES = [['slim', 'Slim', 'Narrow frame'], ['average', 'Average', 'Medium frame'], ['broad', 'Broad', 'Wider frame']];
 const FITS = [['snug', 'Snug', 'Close to body'], ['regular', 'Regular', 'Classic fit'], ['relaxed', 'Relaxed', 'Loose and easy']];
 
@@ -71,12 +94,16 @@ export const SAMPLE_SHOPPER = {
 };
 const VIEWS = [[1, 'Step 1'], [2, 'Step 2'], [3, 'Result']];
 
-export default function SizeFinderPreview({ shop, settings, gender: editorGender }) {
+export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange }) {
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
   const gender = genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
   const [device, setDevice] = useState('desktop');
-  const [view, setView] = useState(3);
+  const [ownView, setOwnView] = useState(3);
+  const view = viewProp || ownView;
+  const setView = onViewChange || setOwnView;
+  const t = (k, size) => advisorText(settings.texts, k, size);
+  const opt = { ...ADVISOR_OPTION_DEFAULTS, ...(settings.options || {}) };
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -142,7 +169,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const drawer = genders.length > 0 && (
     <div className="sfp-drawer">
       <div className="sfp-grab" />
-      <div className="sfp-dtop"><span className="sfp-brand">Size advisor</span><span className="sfp-x" aria-hidden="true">×</span></div>
+      <div className="sfp-dtop"><span className="sfp-brand">{t('advisorTitle')}</span><span className="sfp-x" aria-hidden="true">×</span></div>
       <div className="sfp-scroll">
         <div className="sfp-product"><span className="sfp-thumb" /><span><b>Cotton Kurta</b><small>₹1,299</small></span></div>
         <div className="sfp-progress" aria-hidden="true">{[1, 2, 3].map((i) => <span key={i} className={i <= view ? 'on' : ''} />)}</div>
@@ -150,11 +177,11 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
 
         {view === 1 && (
           <>
-            <p className="sfp-title">Let’s find your fit</p>
-            <p className="sfp-lede">Two measurements, about ten seconds.</p>
+            <p className="sfp-title">{t('step1Title')}</p>
+            <p className="sfp-lede">{t('step1Text')}</p>
             {genders.length > 1 && (
               <div className="sfp-seg">
-                {genders.map((g) => <span key={g} className={gender === g ? 'on' : ''}>{g === 'men' ? 'Menswear' : 'Womenswear'}</span>)}
+                {genders.map((g) => <span key={g} className={gender === g ? 'on' : ''}>{g === 'men' ? t('menLabel') : t('womenLabel')}</span>)}
               </div>
             )}
             <div className="sfp-measure">
@@ -172,17 +199,19 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
                 </div>
               </div>
             </div>
-            <div className="sfp-live">
-              <span><b>Live estimate</b><small>Refines in the next steps</small></span>
-              <span className="sfp-live-size">{result ? result.size : '—'}</span>
-            </div>
+            {opt.liveEstimate && (
+              <div className="sfp-live">
+                <span><b>Live estimate</b><small>Refines in the next steps</small></span>
+                <span className="sfp-live-size">{result ? result.size : '—'}</span>
+              </div>
+            )}
           </>
         )}
 
         {view === 2 && (
           <>
-            <p className="sfp-title">How do you like it to fit?</p>
-            <p className="sfp-lede">Two quick choices make the size more accurate.</p>
+            <p className="sfp-title">{t('step2Title')}</p>
+            <p className="sfp-lede">{t('step2Text')}</p>
             <p className="sfp-q">Body shape</p>
             <div className="sfp-cards">
               {SHAPES.map(([v, l, h]) => <span key={v} className={v === 'average' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
@@ -191,16 +220,18 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             <div className="sfp-cards">
               {FITS.map(([v, l, h]) => <span key={v} className={v === 'regular' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
             </div>
-            <div className="sfp-check">
-              <span><b>Remember my size</b><small>We save only the size, never your height or weight.</small></span>
-              <i className="sfp-switch" aria-hidden="true" />
-            </div>
+            {opt.rememberSize && (
+              <div className="sfp-check">
+                <span><b>Remember my size</b><small>We save only the size, never your height or weight.</small></span>
+                <i className="sfp-switch" aria-hidden="true" />
+              </div>
+            )}
           </>
         )}
 
         {view === 3 && (
           <div className="sfp-result">
-            <p className="sfp-title">Your size</p>
+            <p className="sfp-title">{t('resultTitle')}</p>
             {error && <p className="sfp-err" role="alert">{error}</p>}
             {!error && !result && <p className="sfp-muted sfp-loading">{loading ? 'Working out the size…' : 'Add sizes to this chart to see a result.'}</p>}
             {!error && result && (
@@ -234,7 +265,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
                   <div className="sfp-meter-bar"><span style={{ left: `${meterPosition(result.reasons)}%` }} /></div>
                   <div className="sfp-meter-labels"><span>Snug</span><span>Just right</span><span>Roomy</span></div>
                 </div>
-                <div className="sfp-links"><span>View size chart</span><span>Edit details</span></div>
+                <div className="sfp-links">{opt.sizeChart && <span>View size chart</span>}<span>Edit details</span></div>
               </>
             )}
           </div>
@@ -244,7 +275,9 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
         {view === 1 && <span className="sfp-main">Continue →</span>}
         {view === 2 && <div className="sfp-actions"><span className="sfp-ghost">Back</span><span className="sfp-main">See my size</span></div>}
         {view === 3 && (result
-          ? <div className="sfp-actions"><span className="sfp-ghost">Select {result.size}</span><span className="sfp-main">Add size {result.size} to bag</span></div>
+          ? (opt.addToBag
+            ? <div className="sfp-actions"><span className="sfp-ghost">Select {result.size}</span><span className="sfp-main">{t('addToBagText', result.size)}</span></div>
+            : <span className="sfp-main">Select size {result.size}</span>)
           : <span className="sfp-main">Close</span>)}
         {view === 1 && <p className="sfp-privacy">Used only to work out your size — never saved by the store.</p>}
       </div>

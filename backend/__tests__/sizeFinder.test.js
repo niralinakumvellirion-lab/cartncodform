@@ -117,6 +117,22 @@ describe('sanitizeSettings / sanitizeChart', () => {
     expect(S.publicSettings({}).cardTitle).toBe('Not sure about your size?');
   });
 
+  test('size advisor words and on/off parts: defaults, trimmed, capped, booleans only', () => {
+    const d = S.sanitizeSettings(ok);
+    expect(d.texts.womenLabel).toBe('Womenswear');
+    expect(d.texts.addToBagText).toBe('Add size {size} to bag');
+    expect(d.options).toEqual({ liveEstimate: true, rememberSize: true, addToBag: true, sizeChart: true });
+    const s = S.sanitizeSettings({ ...ok,
+      texts: { womenLabel: '  Ladies  ', menLabel: '', step1Text: 'x'.repeat(300), hacker: 'nope' },
+      options: { liveEstimate: false, addToBag: 'no', extra: true } });
+    expect(s.texts.womenLabel).toBe('Ladies');
+    expect(s.texts.menLabel).toBe('Menswear');
+    expect(s.texts.step1Text).toHaveLength(90);
+    expect(s.texts.hacker).toBeUndefined();
+    expect(s.options).toEqual({ liveEstimate: false, rememberSize: true, addToBag: true, sizeChart: true });
+    expect(S.publicSettings({ ...ok, texts: { menLabel: 'Gents' } }).texts.menLabel).toBe('Gents');
+  });
+
   test('button style and corner radius: allowed values only, 0–24, defaults filled + round', () => {
     const d = S.sanitizeSettings(ok);
     expect(d.buttonStyle).toBe('filled');

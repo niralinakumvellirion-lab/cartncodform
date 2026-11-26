@@ -69,7 +69,7 @@ describe('SizeFinder screen', () => {
 
   it('switch to the men chart, add and remove sizes', async () => {
     await renderScreen();
-    fireEvent.click(screen.getByRole('button', { name: 'Men (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Menswear (1)' }));
     expect(screen.getByLabelText('Row 1 size')).toHaveValue('M');
     fireEvent.click(screen.getByRole('button', { name: '+ Add a size' }));
     fireEvent.change(screen.getByLabelText('Row 2 size'), { target: { value: 'L' } });
@@ -140,7 +140,7 @@ describe('live preview (view only)', () => {
   it('follows the chart editor: Men tab → men chart and men sample shopper', async () => {
     await renderScreen();
     await screen.findByLabelText('Recommended size');
-    fireEvent.click(screen.getByRole('button', { name: 'Men (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Menswear (1)' }));
     await waitFor(() => expect(previewCalls().at(-1)[2].answers).toMatchObject({ gender: 'men', heightCm: 175, weightKg: 72 }));
     expect(previewCalls().at(-1)[2].chart).toEqual(SETTINGS.charts.men);
     expect(screen.getByText(/Sample shopper: Men/)).toBeInTheDocument();
@@ -233,6 +233,37 @@ describe('preview like the storefront size advisor', () => {
     expect(screen.getByTestId('preview-card').querySelector('.sfp-cta').style.borderRadius).toBe('0px');
     const s = await saved();
     expect(s.buttonRadius).toBe(0);
+  });
+});
+
+describe('size advisor words and options', () => {
+  it('words are edited in the admin, shown in the preview (which jumps to that step) and saved', async () => {
+    await renderScreen();
+    await screen.findByLabelText('Recommended size');
+    fireEvent.focus(screen.getByLabelText('Menswear button'));
+    fireEvent.change(screen.getByLabelText('Menswear button'), { target: { value: 'Gents' } });
+    const frame = () => screen.getByTestId('preview-frame');
+    expect(frame()).toHaveTextContent('Gents');
+    expect(screen.getByRole('button', { name: 'Gents (1)' })).toBeInTheDocument(); // chart tab follows
+    fireEvent.focus(screen.getByLabelText('Step 2 heading'));
+    fireEvent.change(screen.getByLabelText('Step 2 heading'), { target: { value: 'Pick your fit' } });
+    expect(frame()).toHaveTextContent('Pick your fit');
+    fireEvent.focus(screen.getByLabelText('Add to bag button'));
+    fireEvent.change(screen.getByLabelText('Add to bag button'), { target: { value: 'Buy {size} now' } });
+    expect(frame()).toHaveTextContent('Buy M now');
+    const s = await saved();
+    expect(s.texts).toMatchObject({ menLabel: 'Gents', step2Title: 'Pick your fit', addToBagText: 'Buy {size} now' });
+  });
+
+  it('on/off parts hide them in the preview and are saved', async () => {
+    const { container } = render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByLabelText('Recommended size');
+    fireEvent.click(screen.getByRole('switch', { name: 'Show Live estimate' }));
+    expect(container.querySelector('.sfp-live')).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Show Add to bag button' }));
+    expect(screen.getByTestId('preview-frame')).toHaveTextContent('Select size M');
+    const s = await saved();
+    expect(s.options).toMatchObject({ liveEstimate: false, addToBag: false, rememberSize: true, sizeChart: true });
   });
 });
 

@@ -281,6 +281,51 @@ describe('ccf-size.js — card that shoppers notice', () => {
   });
 });
 
+describe('ccf-size.js — words and parts set in the admin', () => {
+  const custom = {
+    ...SETTINGS,
+    texts: { womenLabel: 'Ladies', menLabel: 'Gents', advisorTitle: 'Fit guide', step1Title: 'Your body', step1Text: 'Quick and easy.',
+      step2Title: 'Fit choice', step2Text: 'Pick one.', resultTitle: 'Best size', addToBagText: 'Buy {size} now' },
+  };
+
+  test('custom words show in the drawer', async () => {
+    await load({ settings: custom, pageHtml: `
+      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S"><input type="radio" name="Size" value="M"></fieldset>
+        <button type="submit" name="add">Add</button></form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
+    q('.ccf-sf-open').click();
+    expect(q('.ccf-sf-brand').textContent).toBe('Fit guide');
+    expect(q('.ccf-sf-title').textContent).toBe('Your body');
+    expect(q('.ccf-sf-lede').textContent).toBe('Quick and easy.');
+    expect(btn('Ladies')).toBeDefined();
+    expect(btn('Gents')).toBeDefined();
+    btn('Continue').click();
+    expect(q('.ccf-sf-title').textContent).toBe('Fit choice');
+    btn('See my size').click();
+    await flush(); await flush();
+    expect(q('.ccf-sf-title').textContent).toBe('Best size');
+    expect(btn('Buy M now')).toBeDefined();
+  });
+
+  test('parts turned off are not shown', async () => {
+    await load({ settings: { ...SETTINGS, options: { liveEstimate: false, rememberSize: false, addToBag: false, sizeChart: false } }, pageHtml: `
+      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S"><input type="radio" name="Size" value="M"></fieldset>
+        <button type="submit" name="add">Add</button></form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
+    q('.ccf-sf-open').click();
+    await new Promise((res) => setTimeout(res, 10)); await flush();
+    expect(q('.ccf-sf-live')).toBeNull();
+    expect(recommendBodies).toHaveLength(0); // no live estimate calls
+    btn('Continue').click();
+    expect(q('.ccf-sf-check')).toBeNull();
+    btn('See my size').click();
+    await flush(); await flush();
+    expect(btn('View size chart')).toBeUndefined();
+    expect(btn('Add size M to bag')).toBeUndefined();
+    expect(btn('Select size M')).toBeDefined();
+  });
+});
+
 describe('ccf-size.js — size advisor drawer', () => {
   test('opens as a dialog on <body> with the product, closes with Esc or the backdrop', async () => {
     await load({ pageHtml: `

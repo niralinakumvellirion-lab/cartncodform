@@ -20,6 +20,8 @@ const sizeFinderConfigSchema = new mongoose.Schema({
   cardText:    { type: String, default: '3 quick questions · takes 20 seconds' },
   buttonStyle: { type: String, default: 'filled', enum: ['filled', 'outline', 'soft'] },
   buttonRadius: { type: Number, default: 24 },             // px, 0–24; 24 = fully round
+  texts:       { type: mongoose.Schema.Types.Mixed, default: undefined }, // size advisor words (see ADVISOR_TEXTS)
+  options:     { type: mongoose.Schema.Types.Mixed, default: undefined }, // size advisor on/off parts (see ADVISOR_OPTIONS)
   accentColor: { type: String, default: '#111827' },
   unit:        { type: String, default: 'cm', enum: ['cm', 'in'] },
   charts: {

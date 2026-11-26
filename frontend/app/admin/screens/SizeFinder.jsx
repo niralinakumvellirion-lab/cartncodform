@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import ThemeBlockSetup from '../components/ThemeBlockSetup';
-import SizeFinderPreview from './SizeFinderPreview';
+import SizeFinderPreview, { ADVISOR_TEXT_DEFAULTS, ADVISOR_TEXT_MAX, ADVISOR_OPTION_DEFAULTS } from './SizeFinderPreview';
 
 const CM_PER_IN = 2.54;
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
@@ -44,6 +44,7 @@ export function fitScale(previewHeight, viewportHeight) {
 export default function SizeFinderScreen({ shop }) {
   const [settings, setSettings] = useState(null);
   const [gender, setGender] = useState('women');
+  const [previewView, setPreviewView] = useState(3);
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -117,6 +118,51 @@ export default function SizeFinderScreen({ shop }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  const texts = { ...ADVISOR_TEXT_DEFAULTS, ...(settings.texts || {}) };
+  const options = { ...ADVISOR_OPTION_DEFAULTS, ...(settings.options || {}) };
+  function setText(k, v) { set({ texts: { ...(settings.texts || {}), [k]: v } }); }
+  function setOption(k, v) { set({ options: { ...options, [k]: v } }); }
+
+  // Small field components share the page state; focusing one shows that step in the preview.
+  function textField(label, k, view, hint) {
+    return (
+      <label key={k} style={ui.field}>{label}
+        <input
+          type="text"
+          maxLength={ADVISOR_TEXT_MAX[k]}
+          value={(settings.texts && settings.texts[k] != null) ? settings.texts[k] : ADVISOR_TEXT_DEFAULTS[k]}
+          onChange={(e) => setText(k, e.target.value)}
+          onFocus={() => setPreviewView(view)}
+          placeholder={ADVISOR_TEXT_DEFAULTS[k]}
+          style={ui.input}
+          aria-label={label}
+        />
+        {hint && <span style={{ ...ui.muted, margin: 0, fontWeight: 400 }}>{hint}</span>}
+      </label>
+    );
+  }
+  function optionSwitch(k, view, title, text) {
+    const on = options[k];
+    return (
+      <div key={k} style={ui.toggleRow}>
+        <span>
+          <span style={ui.sectionTitle}>{title}</span>
+          <span style={{ ...ui.sectionText, fontSize: 12.5 }}>{text}</span>
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={`Show ${title.replace(/[“”]/g, '')}`}
+          onClick={() => { setOption(k, !on); setPreviewView(view); }}
+          style={{ ...ui.toggle, background: on ? '#303030' : '#C9C9C9', flexShrink: 0 }}
+        >
+          <span style={{ ...ui.knob, transform: on ? 'translateX(20px)' : 'translateX(0)' }} />
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -279,6 +325,45 @@ export default function SizeFinderScreen({ shop }) {
         </div>
       </section>
 
+      <section style={ui.card} aria-label="Size advisor">
+        <SectionHead icon="panel" title="Size advisor" text="The panel that opens when shoppers click the card. Click a box and the preview jumps to that step." />
+
+        <p style={ui.group}>Womenswear / Menswear buttons</p>
+        <div className="sf-grid2">
+          {textField('Womenswear button', 'womenLabel', 1)}
+          {textField('Menswear button', 'menLabel', 1)}
+        </div>
+
+        <p style={ui.group}>Panel</p>
+        {textField('Panel title', 'advisorTitle', 1)}
+
+        <p style={ui.group}>Step 1 · Measurements</p>
+        <div className="sf-grid2">
+          {textField('Step 1 heading', 'step1Title', 1)}
+          {textField('Step 1 small text', 'step1Text', 1)}
+        </div>
+
+        <p style={ui.group}>Step 2 · Fit</p>
+        <div className="sf-grid2">
+          {textField('Step 2 heading', 'step2Title', 2)}
+          {textField('Step 2 small text', 'step2Text', 2)}
+        </div>
+
+        <p style={ui.group}>Result</p>
+        <div className="sf-grid2">
+          {textField('Result heading', 'resultTitle', 3)}
+          {textField('Add to bag button', 'addToBagText', 3, '{size} becomes the size, e.g. M')}
+        </div>
+
+        <p style={ui.group}>Show in the size advisor</p>
+        <div style={ui.toggles}>
+          {optionSwitch('liveEstimate', 1, 'Live estimate', 'Shows a size while shoppers move the sliders (step 1).')}
+          {optionSwitch('rememberSize', 2, '“Remember my size”', 'Lets shoppers save their size for next time (step 2).')}
+          {optionSwitch('addToBag', 3, 'Add to bag button', 'Picks the size and adds it to the cart in one tap.')}
+          {optionSwitch('sizeChart', 3, '“View size chart” link', 'Shows your size chart under the result.')}
+        </div>
+      </section>
+
       <section style={ui.card} aria-label="Size charts">
         <div style={ui.row}>
           <SectionHead icon="chart" title="Size charts" text="Body measurements for each size." />
@@ -292,10 +377,10 @@ export default function SizeFinderScreen({ shop }) {
         </div>
         <p style={ui.tip}>
           Starter Indian charts are filled in — change them to match your clothes. Leave a chart empty to hide
-          Womenswear or Menswear from shoppers.
+          {texts.womenLabel} or {texts.menLabel} from shoppers.
         </p>
         <div style={ui.row} role="group" aria-label="Chart">
-          {[{ v: 'women', l: 'Women' }, { v: 'men', l: 'Men' }].map((g) => (
+          {[{ v: 'women', l: texts.womenLabel }, { v: 'men', l: texts.menLabel }].map((g) => (
             <button key={g.v} type="button" aria-pressed={gender === g.v} onClick={() => setGender(g.v)} style={gender === g.v ? ui.segOn : ui.segOff}>
               {g.l} ({(settings.charts[g.v] || []).length})
             </button>
@@ -361,7 +446,7 @@ export default function SizeFinderScreen({ shop }) {
           className="sf-fit"
           style={{ transform: `scale(${fit.scale})`, width: `${100 / fit.scale}%` }}
         >
-          <SizeFinderPreview shop={shop} settings={settings} gender={gender} />
+          <SizeFinderPreview shop={shop} settings={settings} gender={gender} view={previewView} onViewChange={setPreviewView} />
         </div>
       </aside>
       </div>
@@ -373,6 +458,7 @@ const ICONS = {
   pin: <path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
   card: <><rect x="3" y="6" width="18" height="12" rx="3" /><path d="M7 12h6M16 12h1" /></>,
   chart: <path d="M3 15.5 15.5 3 21 8.5 8.5 21zM7 12l2 2M10 9l2 2M13 6l2 2" />,
+  panel: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M14 4v16M17 9h1M17 12h1" /></>,
 };
 function SectionHead({ icon, title, text }) {
   return (
@@ -398,6 +484,8 @@ const LAYOUT_CSS = `
 .sf-main input[type=text],.sf-main input[type=number]{transition:border-color .15s,box-shadow .15s}
 .sf-main input[type=text]:focus,.sf-main input[type=number]:focus{outline:none;border-color:#303030;box-shadow:0 0 0 3px rgba(48,48,48,.12)}
 .sf-main tbody tr:hover td{background:#FAFAFA}
+.sf-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+@media (max-width:640px){.sf-grid2{grid-template-columns:minmax(0,1fr)}}
 .sf-savebar{position:sticky;bottom:0;z-index:2;background:rgba(246,246,247,.92);backdrop-filter:blur(6px);padding:12px 0;margin:0!important;border-top:1px solid #E3E3E3}
 @media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static;height:auto!important}.sf-fit{transform:none!important;width:100%!important}}
 `;
@@ -443,6 +531,9 @@ const ui = {
   sectionIcon: { width: 34, height: 34, borderRadius: 10, background: '#F1F1F1', color: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   sectionTitle: { display: 'block', fontSize: 15, fontWeight: 600, color: '#303030' },
   sectionText: { display: 'block', fontSize: 13, color: '#616161', marginTop: 2 },
+  group: { fontSize: 11, fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase', color: '#8A8A8A', margin: '6px 0 8px' },
+  toggles: { display: 'flex', flexDirection: 'column', gap: 8 },
+  toggleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, background: '#F7F7F7', borderRadius: 10, padding: '10px 12px' },
   tip: { fontSize: 12.5, color: '#616161', background: '#F7F7F7', borderRadius: 8, padding: '8px 12px', margin: '0 0 14px' },
   switchWrap: { display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 },
   switchText: { fontSize: 13, fontWeight: 600 },

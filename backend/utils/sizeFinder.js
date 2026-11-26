@@ -78,6 +78,37 @@ function sanitizeChart(raw, gender) {
 /** Text on the product-page card, when the store has not changed it. */
 const CARD_DEFAULTS = { cardTitle: 'Not sure about your size?', cardText: '3 quick questions · takes 20 seconds' };
 const BUTTON_STYLES = ['filled', 'outline', 'soft'];
+
+/** Words in the size advisor the store can change: [default, max length]. {size} = the recommended size. */
+const ADVISOR_TEXTS = {
+  womenLabel: ['Womenswear', 24],
+  menLabel: ['Menswear', 24],
+  advisorTitle: ['Size advisor', 30],
+  step1Title: ['Let’s find your fit', 50],
+  step1Text: ['Two measurements, about ten seconds.', 90],
+  step2Title: ['How do you like it to fit?', 50],
+  step2Text: ['Two quick choices make the size more accurate.', 90],
+  resultTitle: ['Your size', 40],
+  addToBagText: ['Add size {size} to bag', 40],
+};
+/** Parts of the size advisor the store can turn off. */
+const ADVISOR_OPTIONS = { liveEstimate: true, rememberSize: true, addToBag: true, sizeChart: true };
+
+function cleanTexts(t) {
+  const src = t && typeof t === 'object' ? t : {};
+  const out = {};
+  Object.keys(ADVISOR_TEXTS).forEach((k) => {
+    const [def, max] = ADVISOR_TEXTS[k];
+    out[k] = String(src[k] == null ? '' : src[k]).replace(/\s+/g, ' ').trim().slice(0, max) || def;
+  });
+  return out;
+}
+function cleanOptions(o) {
+  const src = o && typeof o === 'object' ? o : {};
+  const out = {};
+  Object.keys(ADVISOR_OPTIONS).forEach((k) => { out[k] = typeof src[k] === 'boolean' ? src[k] : ADVISOR_OPTIONS[k]; });
+  return out;
+}
 const MAX_RADIUS = 24; // 24 = fully round (pill)
 function cleanRadius(v) {
   const n = Math.round(Number(v));
@@ -96,6 +127,8 @@ function sanitizeSettings(raw) {
     cardText: String(r.cardText || '').trim().slice(0, 80) || CARD_DEFAULTS.cardText,
     buttonStyle: BUTTON_STYLES.includes(r.buttonStyle) ? r.buttonStyle : 'filled',
     buttonRadius: cleanRadius(r.buttonRadius),
+    texts: cleanTexts(r.texts),
+    options: cleanOptions(r.options),
     accentColor: COLOR_RE.test(String(r.accentColor || '')) ? String(r.accentColor) : '#111827',
     unit: r.unit === 'in' ? 'in' : 'cm',
     charts: {
@@ -121,6 +154,8 @@ function withDefaults(doc) {
     cardText: String(d.cardText || CARD_DEFAULTS.cardText),
     buttonStyle: BUTTON_STYLES.includes(d.buttonStyle) ? d.buttonStyle : 'filled',
     buttonRadius: cleanRadius(d.buttonRadius),
+    texts: cleanTexts(d.texts),
+    options: cleanOptions(d.options),
     accentColor: COLOR_RE.test(String(d.accentColor || '')) ? d.accentColor : '#111827',
     unit: d.unit === 'in' ? 'in' : 'cm',
     charts: {
@@ -145,6 +180,8 @@ function publicSettings(doc) {
     cardText: s.cardText,
     buttonStyle: s.buttonStyle,
     buttonRadius: s.buttonRadius,
+    texts: s.texts,
+    options: s.options,
     accentColor: s.accentColor,
     unit: s.unit,
     genders: GENDERS.filter((g) => s.charts[g].length > 0),
@@ -213,7 +250,7 @@ function recommendSize(chart, body, fit) {
 }
 
 module.exports = {
-  GENDERS, SHAPES, FITS, DEFAULT_CHARTS, CARD_DEFAULTS, BUTTON_STYLES, MAX_RADIUS,
+  GENDERS, SHAPES, FITS, DEFAULT_CHARTS, CARD_DEFAULTS, BUTTON_STYLES, MAX_RADIUS, ADVISOR_TEXTS, ADVISOR_OPTIONS,
   sanitizeChart, sanitizeSettings, withDefaults, publicSettings,
   sanitizeAnswers, estimateBody, recommendSize,
 };
