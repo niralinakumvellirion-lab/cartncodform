@@ -263,8 +263,8 @@ var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
       var icon = el('span', 'ccf-sf-icon');
       icon.innerHTML = size ? CHECK : RULER;
       var copy = el('span', 'ccf-sf-copy');
-      copy.appendChild(el('span', 'ccf-sf-card-title', size ? 'Your size: ' + size : 'Not sure about your size?'));
-      copy.appendChild(el('span', 'ccf-sf-card-sub', size ? 'Based on your answers · tap to change' : '3 quick questions · takes 20 seconds'));
+      copy.appendChild(el('span', 'ccf-sf-card-title', size ? 'Your size: ' + size : (settings.cardTitle || 'Not sure about your size?')));
+      copy.appendChild(el('span', 'ccf-sf-card-sub', size ? 'Based on your answers · tap to change' : (settings.cardText || '3 quick questions · takes 20 seconds')));
       open.appendChild(icon);
       open.appendChild(copy);
       open.appendChild(el('span', 'ccf-sf-cta', size ? 'Change' : (settings.buttonText || 'Find my size') + ' →'));

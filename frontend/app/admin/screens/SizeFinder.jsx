@@ -159,6 +159,33 @@ export default function SizeFinderScreen({ shop }) {
             aria-label="Product tag"
           />
         </label>
+      </section>
+
+      <section style={ui.card} aria-label="Card on the product page">
+        <p style={ui.label}>Card on the product page</p>
+        <p style={ui.muted}>Shoppers see this card right under the Size buttons. Change the words and colour here — the preview on the right updates as you type.</p>
+        <label style={ui.field}>Heading
+          <input
+            type="text"
+            maxLength={60}
+            value={settings.cardTitle ?? ''}
+            onChange={(e) => set({ cardTitle: e.target.value })}
+            placeholder="Not sure about your size?"
+            style={ui.input}
+            aria-label="Card heading"
+          />
+        </label>
+        <label style={ui.field}>Small text
+          <input
+            type="text"
+            maxLength={80}
+            value={settings.cardText ?? ''}
+            onChange={(e) => set({ cardText: e.target.value })}
+            placeholder="3 quick questions · takes 20 seconds"
+            style={ui.input}
+            aria-label="Card small text"
+          />
+        </label>
         <label style={ui.field}>Button text
           <input
             type="text"

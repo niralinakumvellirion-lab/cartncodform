@@ -208,6 +208,13 @@ describe('ccf-size.js — card that shoppers notice', () => {
     expect(card.querySelector('.ccf-sf-cta').textContent).toBe('Find my size →');
   });
 
+  test('heading and small text come from the admin', async () => {
+    await load({ settings: { ...SETTINGS, cardTitle: 'Find your perfect fit', cardText: 'Takes 20 seconds', buttonText: 'Check size' } });
+    expect(q('.ccf-sf-card-title').textContent).toBe('Find your perfect fit');
+    expect(q('.ccf-sf-card-sub').textContent).toBe('Takes 20 seconds');
+    expect(q('.ccf-sf-cta').textContent).toBe('Check size →');
+  });
+
   test('moves right under the Size picker, even when the theme put the block lower down', async () => {
     await load({ pageHtml: `
       <div class="shopify-section">

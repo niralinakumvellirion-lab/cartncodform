@@ -16,6 +16,8 @@ const sizeFinderConfigSchema = new mongoose.Schema({
   enabled:     { type: Boolean, default: false },
   productTag:  { type: String, default: '' },          // '' = every product with a Size option
   buttonText:  { type: String, default: 'Find my size' },
+  cardTitle:   { type: String, default: 'Not sure about your size?' },
+  cardText:    { type: String, default: '3 quick questions · takes 20 seconds' },
   accentColor: { type: String, default: '#111827' },
   unit:        { type: String, default: 'cm', enum: ['cm', 'in'] },
   charts: {

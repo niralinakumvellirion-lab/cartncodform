@@ -138,8 +138,8 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
               <div className="sfp-card">
                 <span className="sfp-icon"><Ruler /></span>
                 <span className="sfp-copy">
-                  <span className="sfp-card-title">Not sure about your size?</span>
-                  <span className="sfp-card-sub">3 quick questions · takes 20 seconds</span>
+                  <span className="sfp-card-title">{settings.cardTitle || 'Not sure about your size?'}</span>
+                  <span className="sfp-card-sub">{settings.cardText || '3 quick questions · takes 20 seconds'}</span>
                 </span>
                 <span className="sfp-cta">{settings.buttonText || 'Find my size'} →</span>
               </div>

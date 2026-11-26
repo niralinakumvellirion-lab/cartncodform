@@ -157,6 +157,28 @@ describe('live preview (view only)', () => {
   });
 });
 
+describe('card on the product page', () => {
+  it('heading, small text and button text are edited in the admin, shown in the preview and saved', async () => {
+    await renderScreen();
+    fireEvent.change(screen.getByLabelText('Card heading'), { target: { value: 'Find your perfect fit' } });
+    fireEvent.change(screen.getByLabelText('Card small text'), { target: { value: 'Answer 3 questions' } });
+    fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Check size' } });
+    const frame = screen.getByTestId('preview-frame');
+    expect(frame.querySelector('.sfp-card-title')).toHaveTextContent('Find your perfect fit');
+    expect(frame.querySelector('.sfp-card-sub')).toHaveTextContent('Answer 3 questions');
+    expect(frame.querySelector('.sfp-cta')).toHaveTextContent('Check size →');
+    const s = await saved();
+    expect(s.cardTitle).toBe('Find your perfect fit');
+    expect(s.cardText).toBe('Answer 3 questions');
+  });
+
+  it('empty fields show the default words in the preview', async () => {
+    await renderScreen();
+    fireEvent.change(screen.getByLabelText('Card heading'), { target: { value: '' } });
+    expect(screen.getByTestId('preview-frame').querySelector('.sfp-card-title')).toHaveTextContent('Not sure about your size?');
+  });
+});
+
 describe('preview design', () => {
   it('view tabs, Desktop / Mobile, progress, inches, fit meter', async () => {
     apiSend.mockResolvedValue({ size: 'M', reasons: [{ area: 'chest', status: 'snug' }] });

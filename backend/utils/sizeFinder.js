@@ -75,6 +75,9 @@ function sanitizeChart(raw, gender) {
   return out;
 }
 
+/** Text on the product-page card, when the store has not changed it. */
+const CARD_DEFAULTS = { cardTitle: 'Not sure about your size?', cardText: '3 quick questions · takes 20 seconds' };
+
 /** Full settings from the admin. Throws validation errors (→ 400). */
 function sanitizeSettings(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
@@ -83,6 +86,8 @@ function sanitizeSettings(raw) {
     enabled: r.enabled === true,
     productTag: tag,
     buttonText: String(r.buttonText || '').trim().slice(0, 40) || 'Find my size',
+    cardTitle: String(r.cardTitle || '').trim().slice(0, 60) || CARD_DEFAULTS.cardTitle,
+    cardText: String(r.cardText || '').trim().slice(0, 80) || CARD_DEFAULTS.cardText,
     accentColor: COLOR_RE.test(String(r.accentColor || '')) ? String(r.accentColor) : '#111827',
     unit: r.unit === 'in' ? 'in' : 'cm',
     charts: {
@@ -104,6 +109,8 @@ function withDefaults(doc) {
     enabled: d.enabled === true,
     productTag: String(d.productTag || ''),
     buttonText: String(d.buttonText || 'Find my size'),
+    cardTitle: String(d.cardTitle || CARD_DEFAULTS.cardTitle),
+    cardText: String(d.cardText || CARD_DEFAULTS.cardText),
     accentColor: COLOR_RE.test(String(d.accentColor || '')) ? d.accentColor : '#111827',
     unit: d.unit === 'in' ? 'in' : 'cm',
     charts: {
@@ -124,6 +131,8 @@ function publicSettings(doc) {
     enabled: s.enabled,
     productTag: s.productTag,
     buttonText: s.buttonText,
+    cardTitle: s.cardTitle,
+    cardText: s.cardText,
     accentColor: s.accentColor,
     unit: s.unit,
     genders: GENDERS.filter((g) => s.charts[g].length > 0),
@@ -192,7 +201,7 @@ function recommendSize(chart, body, fit) {
 }
 
 module.exports = {
-  GENDERS, SHAPES, FITS, DEFAULT_CHARTS,
+  GENDERS, SHAPES, FITS, DEFAULT_CHARTS, CARD_DEFAULTS,
   sanitizeChart, sanitizeSettings, withDefaults, publicSettings,
   sanitizeAnswers, estimateBody, recommendSize,
 };

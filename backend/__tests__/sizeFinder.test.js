@@ -104,6 +104,19 @@ describe('sanitizeSettings / sanitizeChart', () => {
     expect(s.charts.men).toEqual([]);
   });
 
+  test('card heading and small text: trimmed, capped, default when empty, sent to the storefront', () => {
+    const d = S.sanitizeSettings(ok);
+    expect(d.cardTitle).toBe('Not sure about your size?');
+    expect(d.cardText).toBe('3 quick questions · takes 20 seconds');
+    const s = S.sanitizeSettings({ ...ok, cardTitle: '  Find your perfect fit  ', cardText: 'x'.repeat(200) });
+    expect(s.cardTitle).toBe('Find your perfect fit');
+    expect(s.cardText).toHaveLength(80);
+    const pub = S.publicSettings({ ...ok, cardTitle: 'Your fit', cardText: 'Quick help' });
+    expect(pub.cardTitle).toBe('Your fit');
+    expect(pub.cardText).toBe('Quick help');
+    expect(S.publicSettings({}).cardTitle).toBe('Not sure about your size?');
+  });
+
   test('chest must go up row by row', () => {
     expect(() => S.sanitizeChart([{ size: 'S', chest: 90, waist: 70 }, { size: 'M', chest: 90, waist: 74 }], 'women'))
       .toThrow(/chest must be bigger/);
