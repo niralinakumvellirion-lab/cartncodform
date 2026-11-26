@@ -233,22 +233,50 @@ export default function SizeFinderScreen({ shop }) {
             ))}
           </span>
         </div>
-        <label style={ui.field}>
+        <div style={ui.field}>
           <span style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Button corners</span>
             <span style={ui.muted}>{radiusLabel(settings.buttonRadius)}</span>
           </span>
-          <input
-            type="range"
-            min={0}
-            max={24}
-            step={1}
-            value={radiusValue(settings.buttonRadius)}
-            onChange={(e) => set({ buttonRadius: Number(e.target.value) })}
-            style={{ width: '100%', maxWidth: 360, accentColor: '#303030', marginTop: 6 }}
-            aria-label="Button corner radius"
-          />
-        </label>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: 420 }}>
+            <input
+              type="range"
+              min={0}
+              max={24}
+              step={1}
+              value={radiusValue(settings.buttonRadius)}
+              onChange={(e) => set({ buttonRadius: Number(e.target.value) })}
+              style={{ flex: 1, minWidth: 0, accentColor: '#303030' }}
+              aria-label="Button corner radius"
+            />
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="number"
+                min={0}
+                max={24}
+                step={1}
+                value={radiusValue(settings.buttonRadius)}
+                onChange={(e) => { if (e.target.value !== '') set({ buttonRadius: radiusValue(e.target.value) }); }}
+                style={{ ...ui.input, width: 68, textAlign: 'center' }}
+                aria-label="Button corner radius in px"
+              />
+              <span style={ui.muted}>px</span>
+            </span>
+          </span>
+          <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Corner presets">
+            {[[0, 'Square'], [4, '4'], [8, '8'], [12, '12'], [16, '16'], [24, 'Round']].map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={radiusValue(settings.buttonRadius) === v}
+                onClick={() => set({ buttonRadius: v })}
+                style={{ ...(radiusValue(settings.buttonRadius) === v ? ui.segOn : ui.segOff), padding: '4px 10px', fontSize: 12, borderRadius: v === 24 ? 999 : Math.max(v, 4) }}
+              >
+                {l}
+              </button>
+            ))}
+          </span>
+        </div>
       </section>
 
       <section style={ui.card} aria-label="Size charts">

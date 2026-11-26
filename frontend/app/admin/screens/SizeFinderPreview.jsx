@@ -60,7 +60,7 @@ function Figure({ heightCm, weightKg }) {
 
 /**
  * Live preview of the storefront "Find my size" — DISPLAY ONLY, the same design as ccf-size.js:
- * the product page with the size card, and the "Size advisor" drawer (desktop) or bottom sheet (phone).
+ * 1) the card shoppers see on the product page and 2) the "Size advisor" (drawer / phone bottom sheet).
  * Re-draws from the unsaved settings on the page: card words, button style/colour/corners, unit, and the
  * size chart for the Women/Men tab open in the chart editor. The result uses a sample shopper and the
  * backend's maths (POST /api/size-finder/:shop/preview), fetched again ~0.4s after the chart changes.
@@ -69,7 +69,7 @@ export const SAMPLE_SHOPPER = {
   women: { heightCm: 162, weightKg: 60 },
   men: { heightCm: 175, weightKg: 72 },
 };
-const VIEWS = [[0, 'Product page'], [1, 'Step 1'], [2, 'Step 2'], [3, 'Result']];
+const VIEWS = [[1, 'Step 1'], [2, 'Step 2'], [3, 'Result']];
 
 export default function SizeFinderPreview({ shop, settings, gender: editorGender }) {
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
@@ -115,7 +115,6 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   }, [shop, gender, chartKey]);
 
   const sizes = chart.length ? chart.map((r) => String(r.size)) : ['S', 'M', 'L'];
-  const picked = view === 3 && result ? String(result.size) : '';
   const lengthText = (v) => (hUnit === 'ft' ? `${Math.round((v / CM_PER_IN) * 10) / 10} in` : `${v} cm`);
   const heightPct = ((sample.heightCm - 140) / (200 - 140)) * 100;
   const weightPct = ((sample.weightKg - 40) / (130 - 40)) * 100;
@@ -124,40 +123,23 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const ctaClass = `sfp-cta${settings.buttonStyle === 'outline' ? ' is-outline' : settings.buttonStyle === 'soft' ? ' is-soft' : ''}`;
   const good = result && !result.outOfRange;
   const C = 2 * Math.PI * 60;
-  const drawerOpen = view > 0 && genders.length > 0;
 
-  const page = (
-    <div className={`sfp-page${drawerOpen ? ' is-dim' : ''}`}>
-      <div className="sfp-photo" aria-hidden="true">
-        <svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="#A8A39A" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"><path d="M12 6a2 2 0 1 1 2-2" /><path d="M12 6v1.5L3 14a1.5 1.5 0 0 0 .9 2.7h16.2A1.5 1.5 0 0 0 21 14l-9-6.5" /></svg>
-      </div>
-      <div className="sfp-info">
-        <p className="sfp-name">Cotton Kurta</p>
-        <p className="sfp-price">₹1,299</p>
-        <p className="sfp-optlabel">Size</p>
-        <div className="sfp-sizes" aria-label="Example sizes">
-          {sizes.map((s) => <span key={s} className={picked === s ? 'on' : ''}>{s}</span>)}
-        </div>
-        {!genders.length ? (
-          <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the card.</p>
-        ) : (
-          <div className="sfp-card">
-            <span className="sfp-icon"><Ruler /></span>
-            <span className="sfp-copy">
-              <span className="sfp-card-title">{settings.cardTitle || 'Not sure about your size?'}</span>
-              <span className="sfp-card-sub">{settings.cardText || '3 quick questions · takes 20 seconds'}</span>
-            </span>
-            <span className={ctaClass} style={{ borderRadius: ctaRadius(settings.buttonRadius) }}>
-              {settings.buttonText || 'Find my size'} →
-            </span>
-          </div>
-        )}
-        <span className="sfp-add">Add to cart</span>
-      </div>
+  const card = !genders.length ? (
+    <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the card.</p>
+  ) : (
+    <div className="sfp-card">
+      <span className="sfp-icon"><Ruler /></span>
+      <span className="sfp-copy">
+        <span className="sfp-card-title">{settings.cardTitle || 'Not sure about your size?'}</span>
+        <span className="sfp-card-sub">{settings.cardText || '3 quick questions · takes 20 seconds'}</span>
+      </span>
+      <span className={ctaClass} style={{ borderRadius: ctaRadius(settings.buttonRadius) }}>
+        {settings.buttonText || 'Find my size'} →
+      </span>
     </div>
   );
 
-  const drawer = drawerOpen && (
+  const drawer = genders.length > 0 && (
     <div className="sfp-drawer">
       <div className="sfp-grab" />
       <div className="sfp-dtop"><span className="sfp-brand">Size advisor</span><span className="sfp-x" aria-hidden="true">×</span></div>
@@ -283,20 +265,25 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
           ))}
         </div>
       </div>
-      <div className="sfp-views" role="group" aria-label="Preview screen">
-        {VIEWS.map(([v, l]) => (
-          <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{l}</button>
-        ))}
-      </div>
+      <div className={`sfp-stage${device === 'mobile' ? ' is-mobile' : ''}`}>
+        <div className="sfp-block">
+          <p className="sfp-blocktitle"><span>1</span>Card on the product page</p>
+          {/* Display only: inert = no clicks, no keyboard focus inside the previews. */}
+          <div className="sfp-cardbox sfp-static" data-testid="preview-card" {...{ inert: '' }}>{card}</div>
+        </div>
 
-      <div className={`sfp-frame ${device === 'mobile' ? 'is-mobile' : ''}`} data-testid="preview-frame">
-        {device === 'mobile'
-          ? <div className="sfp-notch" aria-hidden="true"><span>9:41</span><i /></div>
-          : <div className="sfp-bar" aria-hidden="true"><i /><i /><i /><span>yourstore.com/products/cotton-kurta</span></div>}
-        {/* Display only: inert = no clicks, no keyboard focus inside the store frame. */}
-        <div className={`sfp-screen sfp-static${drawerOpen ? ' has-drawer' : ''}`} {...{ inert: '' }}>
-          {page}
-          {drawer}
+        <div className="sfp-block">
+          <div className="sfp-blockhead">
+            <p className="sfp-blocktitle"><span>2</span>Size preview</p>
+            <div className="sfp-views" role="group" aria-label="Preview screen">
+              {VIEWS.map(([v, l]) => (
+                <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div className="sfp-frame sfp-static" data-testid="preview-frame" {...{ inert: '' }}>
+            {drawer || <p className="sfp-warn">Add a size chart to see the size preview.</p>}
+          </div>
         </div>
       </div>
       <p className="sfp-sample">
@@ -321,46 +308,33 @@ const CSS = `
 .sfp-dev button[aria-pressed="true"],.sfp-views button[aria-pressed="true"]{background:#fff;color:#1A1A1A;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .sfp-sample{font-size:12px;color:#8A8A8A;margin:10px 2px 0}
 
-/* frames */
-.sfp-frame{border:1px solid #DEDBD5;border-radius:12px;overflow:hidden;background:#F4F2EE;margin:0 auto;transition:max-width .2s}
-.sfp-bar{display:flex;align-items:center;gap:6px;background:#EDEBE6;padding:8px 12px;border-bottom:1px solid #DEDBD5}
-.sfp-bar i{width:9px;height:9px;border-radius:50%;background:#CFCBC3;display:inline-block}
-.sfp-bar span{margin-left:8px;font-size:11px;color:#6B6B6B;background:#fff;border-radius:6px;padding:3px 10px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sfp-frame.is-mobile{max-width:330px;border:9px solid #1A1A1A;border-radius:38px;background:#fff}
-.sfp-notch{position:relative;display:flex;justify-content:space-between;align-items:center;height:26px;padding:0 20px;font-size:11px;font-weight:600;background:#fff}
-.sfp-notch i{position:absolute;left:50%;top:6px;width:70px;height:16px;margin-left:-35px;border-radius:10px;background:#1A1A1A}
+/* two previews */
+.sfp-stage{display:flex;flex-direction:column;gap:14px}
+.sfp-block{background:#F4F2EE;border-radius:12px;padding:14px}
+.sfp-blockhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+.sfp-blocktitle{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#303030;margin:0 0 10px}
+.sfp-blockhead .sfp-blocktitle{margin:0}
+.sfp-blocktitle span{width:20px;height:20px;border-radius:50%;background:#303030;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
+.sfp-cardbox{background:#fff;border-radius:10px;padding:14px;max-width:440px;margin:0 auto}
+.sfp-frame{max-width:400px;margin:0 auto;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.10);border:1px solid #E7E5E0;background:#fff}
+.sfp-stage.is-mobile .sfp-cardbox{max-width:340px}
+.sfp-stage.is-mobile .sfp-frame{max-width:340px;border-radius:18px 18px 0 0}
+.sfp-stage.is-mobile .sfp-grab{display:block;width:34px;height:4px;border-radius:4px;background:#D9D6D0;margin:7px auto 0}
 .sfp-static{pointer-events:none;user-select:none}
-
-/* screen: page + drawer side by side (desktop), page slice + sheet (phone) */
-.sfp-screen{position:relative;display:flex;background:#fff;min-height:420px}
-.sfp-page{flex:1;min-width:0;display:flex;gap:14px;padding:16px;transition:opacity .2s}
-.sfp-screen.has-drawer .sfp-page{flex:0 0 38%;flex-direction:column;opacity:.45;filter:saturate(.6)}
-.sfp-photo{flex:0 0 32%;aspect-ratio:4/5;background:#F4F2EE;border-radius:6px;display:flex;align-items:center;justify-content:center}
-.sfp-screen.has-drawer .sfp-photo{flex:none;width:100%}
-.sfp-info{flex:1;min-width:0}
-.sfp-name{font-size:16px;font-weight:600;letter-spacing:-.01em}
-.sfp-price{font-size:13px;color:#4A4A4A;margin:2px 0 10px}
-.sfp-optlabel{font-size:11px;color:#6B6B6B;margin:0 0 6px}
-.sfp-sizes{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 12px}
-.sfp-sizes span{min-width:30px;height:28px;padding:0 6px;border:1px solid #DEDBD5;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;background:#fff}
-.sfp-sizes span.on{border:1.5px solid #1A1A1A;font-weight:600}
-.sfp-add{display:flex;justify-content:center;border:1px solid #1A1A1A;border-radius:4px;padding:9px;font-size:12px;font-weight:600;margin-top:12px}
 .sfp-warn{font-size:12px;color:#B45309;background:#FFFBEB;border-radius:8px;padding:8px 10px}
 
 /* size card on the page */
 .sfp-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--sfp-accent) 25%,transparent);border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--sfp-accent) 6%,#fff),color-mix(in srgb,var(--sfp-accent) 2%,#fff))}
-.sfp-icon{width:36px;height:36px;border-radius:50%;background:#fff;color:var(--sfp-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px color-mix(in srgb,var(--sfp-accent) 20%,transparent)}
-.sfp-copy{flex:1;min-width:130px;display:flex;flex-direction:column;gap:1px}
-.sfp-card-title{font-size:13px;font-weight:600;line-height:1.3}
-.sfp-card-sub{font-size:11px;color:#6B6B6B}
-.sfp-cta{flex-shrink:0;background:var(--sfp-accent);color:#fff;border:1px solid var(--sfp-accent);border-radius:999px;padding:7px 12px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.sfp-icon{width:40px;height:40px;border-radius:50%;background:#fff;color:var(--sfp-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px color-mix(in srgb,var(--sfp-accent) 20%,transparent)}
+.sfp-copy{flex:1;min-width:140px;display:flex;flex-direction:column;gap:1px}
+.sfp-card-title{font-size:14px;font-weight:600;line-height:1.3}
+.sfp-card-sub{font-size:12px;color:#6B6B6B}
+.sfp-cta{flex-shrink:0;background:var(--sfp-accent);color:#fff;border:1px solid var(--sfp-accent);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;white-space:nowrap}
 .sfp-cta.is-outline{background:#fff;color:var(--sfp-accent)}
 .sfp-cta.is-soft{background:color-mix(in srgb,var(--sfp-accent) 12%,#fff);border-color:transparent;color:var(--sfp-accent)}
-.sfp-screen.has-drawer .sfp-card{flex-wrap:wrap}
-.sfp-screen.has-drawer .sfp-cta{display:none}
 
 /* drawer */
-.sfp-drawer{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff;border-left:1px solid #EEECE8;box-shadow:-10px 0 30px rgba(0,0,0,.08);font-size:12.5px}
+.sfp-drawer{display:flex;flex-direction:column;background:#fff;font-size:12.5px}
 .sfp-grab{display:none}
 .sfp-dtop{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid #EEECE8}
 .sfp-brand{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
@@ -442,12 +416,4 @@ const CSS = `
 .sfp-ghost{flex:1;border:1px solid #1A1A1A;background:#fff}
 .sfp-privacy{font-size:9.5px;color:#8A867E;text-align:center;margin:6px 0 0 !important}
 
-/* phone: page slice on top, bottom sheet over it */
-.sfp-frame.is-mobile .sfp-screen{flex-direction:column;min-height:520px}
-.sfp-frame.is-mobile .sfp-page{flex-direction:column;padding:12px}
-.sfp-frame.is-mobile .sfp-photo{flex:none;width:100%;aspect-ratio:16/10}
-.sfp-frame.is-mobile .sfp-screen.has-drawer{background:#7B7A77}
-.sfp-frame.is-mobile .sfp-screen.has-drawer .sfp-page{flex:none;height:54px;overflow:hidden;opacity:.4}
-.sfp-frame.is-mobile .sfp-drawer{border-left:0;border-radius:16px 16px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.18);margin-top:-12px}
-.sfp-frame.is-mobile .sfp-grab{display:block;width:34px;height:4px;border-radius:4px;background:#D9D6D0;margin:7px auto 0}
 `;

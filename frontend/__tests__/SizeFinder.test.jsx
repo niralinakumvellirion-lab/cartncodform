@@ -114,10 +114,10 @@ describe('live preview (view only)', () => {
     expect(body.chart).toEqual(SETTINGS.charts.women);
     expect(body.answers).toEqual({ gender: 'women', heightCm: 162, weightKg: 60, shape: 'average', fit: 'regular' });
     expect(screen.getByText('Garment length 106 cm')).toBeInTheDocument();
-    expect(screen.getByLabelText('Example sizes').querySelector('.on')).toHaveTextContent('M');
+    expect(screen.getByTestId('preview-frame').querySelector('.sfp-strip .is-you')).toHaveTextContent('M');
 
     fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Which size?' } });
-    expect(screen.getByTestId('preview-frame')).toHaveTextContent('Which size?');
+    expect(screen.getByTestId('preview-card')).toHaveTextContent('Which size?');
   });
 
   it('nothing inside the store frame can be clicked or typed in', async () => {
@@ -125,7 +125,9 @@ describe('live preview (view only)', () => {
     await screen.findByLabelText('Recommended size');
     const frame = screen.getByTestId('preview-frame');
     expect(frame.querySelectorAll('button, input, select, textarea, a')).toHaveLength(0);
-    expect(frame.querySelector('.sfp-static')).toHaveAttribute('inert');
+    expect(frame).toHaveAttribute('inert');
+    expect(screen.getByTestId('preview-card')).toHaveAttribute('inert');
+    expect(screen.getByTestId('preview-card').querySelectorAll('button, input, a')).toHaveLength(0);
   });
 
   it('editing the chart updates the preview result', async () => {
@@ -163,7 +165,7 @@ describe('card on the product page', () => {
     fireEvent.change(screen.getByLabelText('Card heading'), { target: { value: 'Find your perfect fit' } });
     fireEvent.change(screen.getByLabelText('Card small text'), { target: { value: 'Answer 3 questions' } });
     fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Check size' } });
-    const frame = screen.getByTestId('preview-frame');
+    const frame = screen.getByTestId('preview-card');
     expect(frame.querySelector('.sfp-card-title')).toHaveTextContent('Find your perfect fit');
     expect(frame.querySelector('.sfp-card-sub')).toHaveTextContent('Answer 3 questions');
     expect(frame.querySelector('.sfp-cta')).toHaveTextContent('Check size →');
@@ -175,14 +177,14 @@ describe('card on the product page', () => {
   it('empty fields show the default words in the preview', async () => {
     await renderScreen();
     fireEvent.change(screen.getByLabelText('Card heading'), { target: { value: '' } });
-    expect(screen.getByTestId('preview-frame').querySelector('.sfp-card-title')).toHaveTextContent('Not sure about your size?');
+    expect(screen.getByTestId('preview-card').querySelector('.sfp-card-title')).toHaveTextContent('Not sure about your size?');
   });
 
   it('button style and corners: shown in the preview and saved', async () => {
     await renderScreen();
-    const cta = () => screen.getByTestId('preview-frame').querySelector('.sfp-cta');
+    const cta = () => screen.getByTestId('preview-card').querySelector('.sfp-cta');
     expect(cta().style.borderRadius).toBe('999px');
-    expect(screen.getByText('Round')).toBeInTheDocument();
+    expect(screen.getByText('Round', { selector: 'span' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Outline' }));
     fireEvent.change(screen.getByLabelText('Button corner radius'), { target: { value: '8' } });
     expect(cta().className).toMatch(/is-outline/);
@@ -205,18 +207,32 @@ describe('card on the product page', () => {
 });
 
 describe('preview like the storefront size advisor', () => {
-  it('Product page view shows the card without the drawer; steps show the Size advisor drawer', async () => {
+  it('only two previews: the card, and the Size advisor with Step 1 / Step 2 / Result', async () => {
     const { container } = render(<SizeFinderScreen shop={SHOP} />);
     await screen.findByLabelText('Recommended size');
-    expect(container.querySelector('.sfp-drawer')).not.toBeNull();
+    expect(screen.getByText('Card on the product page', { selector: '.sfp-blocktitle' })).toBeInTheDocument();
+    expect(screen.getByText('Size preview', { selector: '.sfp-blocktitle' })).toBeInTheDocument();
+    expect(screen.getByTestId('preview-card').querySelector('.sfp-card')).not.toBeNull();
     expect(screen.getByTestId('preview-frame')).toHaveTextContent('Size advisor');
-    expect(container.querySelector('.sfp-strip .is-you')).toHaveTextContent('M');
-    fireEvent.click(screen.getByRole('button', { name: 'Product page' }));
-    expect(container.querySelector('.sfp-drawer')).toBeNull();
-    expect(container.querySelector('.sfp-card')).not.toBeNull();
+    // no fake product page: no photo, size buttons or add to cart
+    expect(container.querySelector('.sfp-photo, .sfp-sizes, .sfp-add')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Product page' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Step 1' }));
     expect(container.querySelector('.sfp-live-size')).toHaveTextContent('M');
     expect(screen.getByTestId('preview-frame')).toHaveTextContent('Womenswear');
+  });
+
+  it('corners: number box and presets', async () => {
+    await renderScreen();
+    fireEvent.change(screen.getByLabelText('Button corner radius in px'), { target: { value: '30' } });
+    expect(screen.getByLabelText('Button corner radius in px')).toHaveValue(24);
+    fireEvent.change(screen.getByLabelText('Button corner radius in px'), { target: { value: '10' } });
+    expect(screen.getByTestId('preview-card').querySelector('.sfp-cta').style.borderRadius).toBe('10px');
+    expect(screen.getByLabelText('Button corner radius')).toHaveValue('10');
+    fireEvent.click(screen.getByRole('button', { name: 'Square' }));
+    expect(screen.getByTestId('preview-card').querySelector('.sfp-cta').style.borderRadius).toBe('0px');
+    const s = await saved();
+    expect(s.buttonRadius).toBe(0);
   });
 });
 
@@ -231,7 +247,7 @@ describe('preview design', () => {
     expect(container.querySelectorAll('.sfp-progress span.on')).toHaveLength(3);
 
     fireEvent.click(screen.getByRole('button', { name: 'Mobile' }));
-    expect(container.querySelector('.sfp-frame').className).toMatch(/is-mobile/);
+    expect(container.querySelector('.sfp-stage').className).toMatch(/is-mobile/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Step 1' }));
     expect(container.querySelectorAll('.sfp-progress span.on')).toHaveLength(1);
