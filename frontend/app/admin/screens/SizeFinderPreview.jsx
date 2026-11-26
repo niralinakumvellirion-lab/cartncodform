@@ -368,10 +368,10 @@ const CSS = `
 .sfp-stage.is-mobile .sfp-frame{max-width:340px;border-radius:18px 18px 0 0}
 .sfp-stage.is-mobile .sfp-grab{display:block;width:34px;height:4px;border-radius:4px;background:#D9D6D0;margin:7px auto 0}
 .sfp-static{pointer-events:none;user-select:none}
-.sfp .is-hl{outline:2px solid #4F46E5;outline-offset:3px;border-radius:6px;box-shadow:0 0 0 5px rgba(79,70,229,.14);animation:sfp-hl .7s ease-out 2;transition:outline-color .2s}
-@keyframes sfp-hl{0%{box-shadow:0 0 0 0 rgba(79,70,229,.35)}100%{box-shadow:0 0 0 5px rgba(79,70,229,.14)}}
-.sfp .sfp-seg span.is-hl{outline-offset:-4px;border-radius:2px;animation:none;box-shadow:inset 0 0 0 6px rgba(79,70,229,.18)}
-.sfp .sfp-seg span.on.is-hl{outline-color:#A5B4FC}
+.sfp .is-hl{outline:1.5px dashed #6366F1;outline-offset:3px;border-radius:6px;animation:sfp-hl .35s ease-out}
+@keyframes sfp-hl{from{outline-color:transparent;outline-offset:6px}to{outline-color:#6366F1;outline-offset:3px}}
+.sfp .sfp-seg span.is-hl{outline-offset:-4px;border-radius:2px;animation:none}
+.sfp .sfp-seg span.on.is-hl{outline-color:#C7D2FE}
 @media (prefers-reduced-motion:reduce){.sfp .is-hl{animation:none}}
 .sfp-editing{display:inline-flex;align-items:center;gap:5px;color:#4338CA;font-weight:600}
 .sfp-editing i{width:7px;height:7px;border-radius:50%;background:#4F46E5;box-shadow:0 0 0 3px rgba(79,70,229,.2)}
