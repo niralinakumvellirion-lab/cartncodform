@@ -569,7 +569,7 @@ const ui = {
   sectionIcon: { width: 34, height: 34, borderRadius: 10, background: '#F1F1F1', color: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   sectionTitle: { display: 'block', fontSize: 15, fontWeight: 600, color: '#303030' },
   sectionText: { display: 'block', fontSize: 13, color: '#616161', marginTop: 2 },
-  group: { fontSize: 11, fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase', color: '#8A8A8A', margin: '6px 0 8px' },
+  group: { fontSize: 12.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#303030', margin: '8px 0 10px' },
   toggles: { display: 'flex', flexDirection: 'column', gap: 8 },
   toggleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, background: '#F7F7F7', borderRadius: 10, padding: '10px 12px' },
   offCard: { background: '#fff', border: '1px dashed #C9C9C9', borderRadius: 12, padding: '36px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },

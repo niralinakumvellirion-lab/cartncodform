@@ -359,7 +359,7 @@ const CSS = `
 .sfp-stage{display:flex;flex-direction:column;gap:14px}
 .sfp-block{background:#F4F2EE;border-radius:12px;padding:14px}
 .sfp-blockhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
-.sfp-blocktitle{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#303030;margin:0 0 10px}
+.sfp-blocktitle{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:#303030;margin:0 0 10px}
 .sfp-blockhead .sfp-blocktitle{margin:0}
 .sfp-blocktitle span{width:20px;height:20px;border-radius:50%;background:#303030;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
 .sfp-cardbox{background:#fff;border-radius:10px;padding:14px;max-width:440px;margin:0 auto}
