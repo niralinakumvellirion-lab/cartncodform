@@ -94,7 +94,7 @@ export const SAMPLE_SHOPPER = {
 };
 const VIEWS = [[1, 'Step 1'], [2, 'Step 2'], [3, 'Result']];
 
-export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange }) {
+export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth }) {
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
   const gender = genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
@@ -290,7 +290,12 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
       <div className="sfp-top">
         <div>
           <p className="sfp-label">Live preview</p>
-          <p className="sfp-muted">View only · updates as you edit, before you save</p>
+          <p className="sfp-muted">
+            {show === 'card' ? 'Showing the card you are editing' : show === 'advisor' ? 'Showing the size preview you are editing' : 'View only · updates as you edit, before you save'}
+            {show !== 'both' && onShowBoth && (
+              <> · <button type="button" className="sfp-both" onClick={onShowBoth}>Show both</button></>
+            )}
+          </p>
         </div>
         <div className="sfp-dev" role="group" aria-label="Preview size">
           {[['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([v, l]) => (
@@ -299,12 +304,15 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
         </div>
       </div>
       <div className={`sfp-stage${device === 'mobile' ? ' is-mobile' : ''}`}>
+        {show !== 'advisor' && (
         <div className="sfp-block">
           <p className="sfp-blocktitle"><span>1</span>Card on the product page</p>
           {/* Display only: inert = no clicks, no keyboard focus inside the previews. */}
           <div className="sfp-cardbox sfp-static" data-testid="preview-card" {...{ inert: '' }}>{card}</div>
         </div>
+        )}
 
+        {show !== 'card' && (
         <div className="sfp-block">
           <div className="sfp-blockhead">
             <p className="sfp-blocktitle"><span>2</span>Size preview</p>
@@ -318,6 +326,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {drawer || <p className="sfp-warn">Add a size chart to see the size preview.</p>}
           </div>
         </div>
+        )}
       </div>
       <p className="sfp-sample">
         Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, average shape, regular fit.
@@ -339,6 +348,7 @@ const CSS = `
 .sfp-views{margin:0 0 12px;flex-wrap:wrap}
 .sfp-dev button,.sfp-views button{border:0;background:transparent;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:500;color:#616161;cursor:pointer}
 .sfp-dev button[aria-pressed="true"],.sfp-views button[aria-pressed="true"]{background:#fff;color:#1A1A1A;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.sfp-both{background:none;border:0;padding:0;font-size:12px;font-weight:600;color:#303030;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .sfp-sample{font-size:12px;color:#8A8A8A;margin:10px 2px 0}
 
 /* two previews */

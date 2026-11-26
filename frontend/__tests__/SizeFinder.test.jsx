@@ -292,6 +292,39 @@ describe('on / off', () => {
   });
 });
 
+describe('preview follows the section being edited', () => {
+  it('both at first; card section → only the card; size sections → only the size preview; Show both', async () => {
+    await renderScreen();
+    await screen.findByLabelText('Recommended size');
+    expect(screen.getByTestId('preview-card')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
+
+    fireEvent.focus(screen.getByLabelText('Card heading'));
+    expect(screen.getByTestId('preview-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('preview-frame')).toBeNull();
+    expect(screen.getByText(/Showing the card you are editing/)).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Outline' })); // buttons count too
+    expect(screen.queryByTestId('preview-frame')).toBeNull();
+
+    fireEvent.focus(screen.getByLabelText('Row 1 Chest')); // size chart
+    expect(screen.queryByTestId('preview-card')).toBeNull();
+    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
+
+    fireEvent.focus(screen.getByLabelText('Step 1 heading')); // size advisor words
+    expect(screen.queryByTestId('preview-card')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show both' }));
+    expect(screen.getByTestId('preview-card')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
+
+    fireEvent.focus(screen.getByLabelText('Card heading'));
+    fireEvent.focus(screen.getByLabelText('Product tag')); // "Where it shows" → both again
+    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-card')).toBeInTheDocument();
+  });
+});
+
 describe('preview design', () => {
   it('view tabs, Desktop / Mobile, progress, inches, fit meter', async () => {
     apiSend.mockResolvedValue({ size: 'M', reasons: [{ area: 'chest', status: 'snug' }] });

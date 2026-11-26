@@ -45,6 +45,8 @@ export default function SizeFinderScreen({ shop }) {
   const [settings, setSettings] = useState(null);
   const [gender, setGender] = useState('women');
   const [previewView, setPreviewView] = useState(3);
+  // Which preview to show: the part the seller is editing ('card' / 'advisor'), or 'both'.
+  const [previewShow, setPreviewShow] = useState('both');
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -119,6 +121,12 @@ export default function SizeFinderScreen({ shop }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  // Clicking or typing anywhere in a section shows that section's preview on the right.
+  function focusArea(area) {
+    const pick = () => setPreviewShow(area);
+    return { onFocusCapture: pick, onMouseDownCapture: pick };
   }
 
   const texts = { ...ADVISOR_TEXT_DEFAULTS, ...(settings.texts || {}) };
@@ -209,7 +217,7 @@ export default function SizeFinderScreen({ shop }) {
           <button type="button" style={ui.save} onClick={() => set({ enabled: true })}>Turn on Find my size</button>
         </section>
       ) : (<>
-      <section style={ui.card}>
+      <section style={ui.card} {...focusArea('both')}>
         <SectionHead icon="pin" title="Where it shows" text="Every product that has a Size option. Add a tag to show it only on some products." />
         <label style={ui.field}>Only on products with this tag (optional)
           <input
@@ -224,7 +232,7 @@ export default function SizeFinderScreen({ shop }) {
         </label>
       </section>
 
-      <section style={ui.card} aria-label="Card on the product page">
+      <section style={ui.card} aria-label="Card on the product page" {...focusArea('card')}>
         <SectionHead icon="card" title="Card on the product page" text="Shoppers see this card right under the Size buttons. The preview updates as you type." />
         <label style={ui.field}>Heading
           <input
@@ -339,7 +347,7 @@ export default function SizeFinderScreen({ shop }) {
         </div>
       </section>
 
-      <section style={ui.card} aria-label="Size advisor">
+      <section style={ui.card} aria-label="Size advisor" {...focusArea('advisor')}>
         <SectionHead icon="panel" title="Size advisor" text="The panel that opens when shoppers click the card. Click a box and the preview jumps to that step." />
 
         <p style={ui.group}>Womenswear / Menswear buttons</p>
@@ -378,7 +386,7 @@ export default function SizeFinderScreen({ shop }) {
         </div>
       </section>
 
-      <section style={ui.card} aria-label="Size charts">
+      <section style={ui.card} aria-label="Size charts" {...focusArea('advisor')}>
         <div style={ui.row}>
           <SectionHead icon="chart" title="Size charts" text="Body measurements for each size." />
           <span style={ui.seg} role="group" aria-label="Unit">
@@ -390,7 +398,7 @@ export default function SizeFinderScreen({ shop }) {
           </span>
         </div>
         <p style={ui.tip}>
-          Starter Indian charts are filled in — change them to match your clothes. Leave a chart empty to hide
+          Starter Indian charts are filled in — change them to match your clothes. Leave a chart empty to hide{" "}
           {texts.womenLabel} or {texts.menLabel} from shoppers.
         </p>
         <div style={ui.row} role="group" aria-label="Chart">
@@ -462,7 +470,7 @@ export default function SizeFinderScreen({ shop }) {
           className="sf-fit"
           style={{ transform: `scale(${fit.scale})`, width: `${100 / fit.scale}%` }}
         >
-          <SizeFinderPreview shop={shop} settings={settings} gender={gender} view={previewView} onViewChange={setPreviewView} />
+          <SizeFinderPreview shop={shop} settings={settings} gender={gender} view={previewView} onViewChange={setPreviewView} show={previewShow} onShowBoth={() => setPreviewShow('both')} />
         </div>
       </aside>
       )}
