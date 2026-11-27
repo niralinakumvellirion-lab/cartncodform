@@ -188,12 +188,13 @@ export default function SizeFinderScreen({ shop }) {
   const wordsChanged = Object.keys(ADVISOR_TEXT_DEFAULTS).filter((k) => settings.texts && typeof settings.texts[k] === 'string'
     && settings.texts[k].trim() && settings.texts[k].trim() !== ADVISOR_TEXT_DEFAULTS[k]).length;
   const STYLE_NAME = { filled: 'Filled', outline: 'Outline', soft: 'Soft' };
+  // badge: a short count on the tab; hint: the full status, read out and shown on hover.
   const steps = [
-    { id: 'chart', title: 'Size chart', status: chartCount ? `${chartCount} sizes` : 'No sizes yet', done: chartCount > 0 },
-    { id: 'button', title: 'Button', status: `${STYLE_NAME[settings.buttonStyle] || 'Outline'} · ${radiusLabel(settings.buttonRadius)}`, done: true },
-    { id: 'features', title: 'Shopper features', status: `${featuresOn} of 4 on`, done: true },
-    { id: 'words', title: 'Words', status: wordsChanged ? `${wordsChanged} changed` : 'Default words', done: true, optional: true },
-    { id: 'live', title: 'Go live', status: settings.productTag ? `Tag: ${settings.productTag}` : 'All products with sizes', done: true },
+    { id: 'chart', title: 'Size chart', badge: String(chartCount), hint: chartCount ? `${chartCount} sizes` : 'No sizes yet' },
+    { id: 'button', title: 'Button', badge: '', hint: `${STYLE_NAME[settings.buttonStyle] || 'Outline'} · ${radiusLabel(settings.buttonRadius)}` },
+    { id: 'features', title: 'Shopper features', badge: `${featuresOn}/4`, hint: `${featuresOn} of 4 on` },
+    { id: 'words', title: 'Words', badge: wordsChanged ? 'Edited' : '', hint: wordsChanged ? `${wordsChanged} changed` : 'Default words' },
+    { id: 'live', title: 'Go live', badge: settings.productTag ? 'Tag' : '', hint: settings.productTag ? `Tag: ${settings.productTag}` : 'All products with sizes' },
   ];
   const stepAt = steps.findIndex((x) => x.id === tab);
   function goStep(id) {
@@ -209,20 +210,20 @@ export default function SizeFinderScreen({ shop }) {
     const on = options[k];
     const name = title.replace(/[“”]/g, '');
     return (
-      <div key={k} className={`sf-tile${on ? ' is-on' : ''}`} data-hl={k} data-hl-label={name}>
-        <span className="sf-tileicon" aria-hidden="true">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{FEATURE_ICONS[icon]}</svg>
+      <div key={k} className="sf-feature" data-hl={k} data-hl-label={name}>
+        <span className="sf-featureicon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{FEATURE_ICONS[icon]}</svg>
         </span>
-        <span className="sf-tilecopy"><b>{title}</b><small>{text}</small></span>
+        <span className="sf-featurecopy"><span className="sf-featurename">{title}</span><span className="sf-help">{text}</span></span>
         <button
           type="button"
           role="switch"
           aria-checked={on}
           aria-label={`Show ${name}`}
           onClick={() => { setOption(k, !on); setPreviewView(mv(view)); }}
-          style={{ ...ui.toggle, background: on ? '#303030' : '#C9C9C9', flexShrink: 0 }}
+          style={{ ...ui.toggle, background: on ? '#303030' : '#B5B5B5', flexShrink: 0 }}
         >
-          <span style={{ ...ui.knob, transform: on ? 'translateX(20px)' : 'translateX(0)' }} />
+          <span style={{ ...ui.knob, transform: on ? 'translateX(14px)' : 'translateX(0)' }} />
         </button>
       </div>
     );
@@ -256,49 +257,41 @@ export default function SizeFinderScreen({ shop }) {
       <style>{LAYOUT_CSS}</style>
       <div className={`sf-layout${settings.enabled && isOn && !showPicker ? '' : ' is-off'}`} ref={layoutRef}>
       <div className="sf-main">
-      <div className={showPicker ? '' : 'sf-headwrap'}>
-      <div style={ui.head} className="sf-head">
-        <span className="sf-headicon" aria-hidden="true">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z" /><path d="m7 12 2 2M10 9l2 2M13 6l2 2" /></svg>
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={ui.h1}>Find my size</h1>
-          <p style={{ ...ui.muted, margin: '0 0 10px' }}>
+      <header className="sf-pagehead">
+        <div style={{ minWidth: 0 }}>
+          <div className="sf-titlerow">
+            <h1 className="sf-h1">Find my size</h1>
+            {isOn && !showPicker && (
+              <span className={`sf-badge${settings.enabled ? ' is-on' : ''}`}>{settings.enabled ? 'Active' : 'Off'}</span>
+            )}
+          </div>
+          <p className="sf-subtitle">
             {showPicker
-              ? 'Help shoppers pick the right size before they buy — set up for what your store sells.'
+              ? 'Help shoppers pick the right size before they buy, set up for what your store sells.'
               : measure
               ? `Shoppers measure their ${measure.value.toLowerCase()} and get the right size from your chart.`
               : storeType === 'clothing'
-                ? 'Shoppers enter height, weight and build, and get the right size from your chart.'
-                : 'Help shoppers pick the right size before they buy — set up for what your store sells.'}
+                ? 'Shoppers enter their height, weight and build, and get the right size from your chart.'
+                : 'Help shoppers pick the right size before they buy, set up for what your store sells.'}
           </p>
-          {isOn && !showPicker && (
-          <span style={{ ...ui.pill, ...(settings.enabled ? ui.pillOn : ui.pillOff) }}>
-            <span style={{ ...ui.dot, background: settings.enabled ? '#047857' : '#B45309' }} />
-            {settings.enabled ? 'Showing on your store' : 'Hidden — turn on and save to show it'}
-          </span>
-          )}
         </div>
         {isOn && !showPicker && (
-        <span style={ui.switchWrap}>
-          <span aria-hidden="true" style={{ ...ui.switchText, color: settings.enabled ? '#065F46' : '#B45309' }}>
-            {settings.enabled ? 'On' : 'Off'}
-          </span>
+        <label className="sf-switchwrap">
+          <span>Show on store</span>
           <button
             type="button"
             role="switch"
             aria-checked={settings.enabled}
             aria-label="Turn on Find my size"
             onClick={() => set({ enabled: !settings.enabled })}
-            style={{ ...ui.toggle, background: settings.enabled ? '#4F46E5' : '#9CA3AF' }}
+            style={{ ...ui.toggle, background: settings.enabled ? '#303030' : '#B5B5B5' }}
           >
-            <span style={{ ...ui.knob, transform: settings.enabled ? 'translateX(20px)' : 'translateX(0)' }} />
+            <span style={{ ...ui.knob, transform: settings.enabled ? 'translateX(14px)' : 'translateX(0)' }} />
           </button>
-        </span>
+        </label>
         )}
-      </div>
+      </header>
       {!showPicker && <StoreTypeCard type={typeInfo} onChange={() => setChoosing(true)} />}
-      </div>
       {showPicker ? (
         <StoreTypePicker
           catalog={meta.storeTypes}
@@ -312,36 +305,38 @@ export default function SizeFinderScreen({ shop }) {
       ) : !settings.enabled ? (
         <section style={ui.offCard} aria-label="Find my size is off">
           <span style={ui.offIcon} aria-hidden="true">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z" /><path d="m7 12 2 2M10 9l2 2M13 6l2 2" /></svg>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z" /><path d="m7 12 2 2M10 9l2 2M13 6l2 2" /></svg>
           </span>
           <p style={ui.offTitle}>Find my size is off</p>
           <p style={ui.offText}>
-            Turn it on to set up the size card, the size advisor and your size charts, with a live preview.
-            Shoppers won&apos;t see anything while it&apos;s off.
+            Turn it on to set up the button, the size helper and your size chart, with a live preview.
+            Shoppers don&apos;t see anything while it&apos;s off.
           </p>
           <button type="button" style={ui.save} onClick={() => set({ enabled: true })}>Turn on Find my size</button>
         </section>
       ) : (<>
-      <nav className="sf-steps" role="tablist" aria-label="Set up steps">
-        {steps.map((st, i) => (
+      <nav className="sf-tabs" role="tablist" aria-label="Set up steps">
+        {steps.map((st) => (
           <button
             key={st.id}
             type="button"
             role="tab"
             aria-selected={tab === st.id}
             aria-controls="sf-panel"
-            className={`sf-step${tab === st.id ? ' is-on' : ''}`}
+            aria-description={st.hint}
+            title={st.hint}
+            className={`sf-tab${tab === st.id ? ' is-on' : ''}`}
             onClick={() => goStep(st.id)}
           >
-            <span className={`sf-stepnum${st.done && tab !== st.id ? ' is-done' : ''}`} aria-hidden="true">{st.done && tab !== st.id ? '✓' : i + 1}</span>
-            <span className="sf-stepcopy"><b>{st.title}</b><small>{st.status}</small></span>
+            <span className="sf-tabname">{st.title}</span>
+            {st.badge && <span className="sf-tabbadge">{st.badge}</span>}
           </button>
         ))}
       </nav>
       <div id="sf-panel" role="tabpanel" aria-label={steps[stepAt].title} className="sf-panel">
       {tab === 'live' && (
       <section style={ui.card} {...focusArea()}>
-        <SectionHead icon="pin" title="Where it shows" text="Every product that has a Size option. Add a tag to show it only on some products." />
+        <SectionHead icon="pin" title="Where it shows" text="Shown on every product that has a Size option. Add a tag to limit it to some products." />
         <label style={ui.field} data-hl="productTag" data-hl-label="Product tag">Only on products with this tag (optional)
           <input
             type="text"
@@ -358,7 +353,7 @@ export default function SizeFinderScreen({ shop }) {
 
       {tab === 'button' && (
       <section style={ui.card} aria-label="Button on the product page" {...focusArea()}>
-        <SectionHead icon="card" title="Button on the product page" text="A full-width button right under the Size buttons. It opens the size advisor. The preview updates as you type." />
+        <SectionHead icon="card" title="Button on the product page" text="A full-width button under the size options that opens the size helper. The preview updates as you type." />
         <label style={ui.field} data-hl="buttonText" data-hl-label="Button text">Button text
           <input
             type="text"
@@ -464,10 +459,10 @@ export default function SizeFinderScreen({ shop }) {
 
       {tab === 'features' && (
       <section style={ui.card} aria-label="Shopper features" {...focusArea()}>
-        <SectionHead icon="spark" title="Shopper features" text="What shoppers can use in the size helper. Turn off anything you don't want — the preview shows the change." />
-        <div className="sf-tiles">
+        <SectionHead icon="spark" title="Shopper features" text="Choose what shoppers can use in the size helper. The preview shows each change." />
+        <div className="sf-features">
           {featureTile('liveEstimate', measure ? 1 : 2, 'Likely size', measure ? 'Shows a size while shoppers move the slider.' : 'Shows a size while shoppers move the height and weight sliders.', 'eye')}
-          {featureTile('rememberSize', measure ? 1 : 3, '“Remember my size”', 'Saves the size for next time — never the measurements.', 'save')}
+          {featureTile('rememberSize', measure ? 1 : 3, '“Remember my size”', 'Saves the size for next time, never the measurements.', 'save')}
           {featureTile('addToBag', 5, 'Add to cart button', 'Picks the size and adds it to the cart in one tap.', 'cart')}
           {featureTile('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.', 'table')}
         </div>
@@ -476,8 +471,8 @@ export default function SizeFinderScreen({ shop }) {
 
       {tab === 'words' && (measure ? (
       <section style={ui.card} aria-label="Size helper" {...focusArea()}>
-        <SectionHead icon="panel" title="Words" text="Optional — the default words already work. Click a box and the preview jumps to that screen." />
-        <p style={ui.group}>Panel</p>
+        <SectionHead icon="panel" title="Words" text="Optional. The default words work well; edit any line and the preview jumps to that screen." />
+        <p style={{ ...ui.group, borderTop: 0, paddingTop: 0 }}>Panel</p>
         <div className="sf-grid2">
           {textField('Panel title', 'advisorTitle', 1)}
           {textField('Privacy note', 'privacyText', 1)}
@@ -491,9 +486,9 @@ export default function SizeFinderScreen({ shop }) {
       </section>
       ) : (
       <section style={ui.card} aria-label="Size advisor" {...focusArea()}>
-        <SectionHead icon="panel" title="Words" text="Optional — the default words already work. Click a box and the preview jumps to that screen." />
+        <SectionHead icon="panel" title="Words" text="Optional. The default words work well; edit any line and the preview jumps to that screen." />
 
-        <p style={ui.group}>Panel</p>
+        <p style={{ ...ui.group, borderTop: 0, paddingTop: 0 }}>Panel</p>
         <div className="sf-grid2">
           {textField('Panel title', 'advisorTitle', 1)}
           {textField('Privacy note', 'privacyText', 1)}
@@ -707,76 +702,63 @@ const FEATURE_ICONS = {
   table: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></>,
 };
 
-const ICONS = {
-  spark: <><rect x="2" y="6" width="20" height="12" rx="6" /><circle cx="16" cy="12" r="3" /></>,
-  pin: <path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
-  card: <><rect x="3" y="6" width="18" height="12" rx="3" /><path d="M7 12h6M16 12h1" /></>,
-  chart: <path d="M3 15.5 15.5 3 21 8.5 8.5 21zM7 12l2 2M10 9l2 2M13 6l2 2" />,
-  panel: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M14 4v16M17 9h1M17 12h1" /></>,
-};
-function SectionHead({ icon, title, text }) {
+function SectionHead({ title, text }) {
   return (
-    <div style={ui.sectionHead}>
-      <span style={ui.sectionIcon} aria-hidden="true">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{ICONS[icon]}</svg>
-      </span>
-      <span>
-        <span style={ui.sectionTitle}>{title}</span>
-        <span style={ui.sectionText}>{text}</span>
-      </span>
+    <div className="sf-cardhead">
+      <h2 className="sf-cardtitle">{title}</h2>
+      {text && <p className="sf-help">{text}</p>}
     </div>
   );
 }
 
 // Settings on the left, live preview pinned on the right; stacked on narrow screens.
 const LAYOUT_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap');
 .sf-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:20px;align-items:start}
 .sf-layout{min-height:100vh}
 .sf-layout.is-off{grid-template-columns:minmax(0,860px);justify-content:center;min-height:0}
 .sf-main{display:flex;flex-direction:column;gap:16px;min-width:0;padding-bottom:40px}
 .sf-side{position:sticky;top:16px;min-width:0;overflow:visible}
 .sf-fit{transform-origin:top left}
-.sf-main input[type=text],.sf-main input[type=number]{transition:border-color .15s,box-shadow .15s}
-.sf-main input[type=text]:focus,.sf-main input[type=number]:focus{outline:none;border-color:#303030;box-shadow:0 0 0 3px rgba(48,48,48,.12)}
-.sf-main tbody tr:hover td{background:#FAFAFA}
-.sf-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+.sf-main input[type=text],.sf-main input[type=number],.sf-main input[type=search]{transition:border-color .12s,box-shadow .12s}
+.sf-main input[type=text]:hover,.sf-main input[type=number]:hover{border-color:#616161}
+.sf-main input[type=text]:focus,.sf-main input[type=number]:focus{outline:none;border-color:#303030;box-shadow:0 0 0 1px #303030}
+.sf-main tbody tr:hover td{background:#F7F7F7}
+.sf-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
 @media (max-width:640px){.sf-grid2{grid-template-columns:minmax(0,1fr)}}
-.sf-head{background:#fff;border:1px solid #E3E3E3;border-radius:14px;padding:18px 20px;box-shadow:0 1px 2px rgba(0,0,0,.04);align-items:center!important}
-.sf-headwrap{background:#fff;border:1px solid #E3E3E3;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.04);overflow:hidden}
-.sf-headwrap .sf-head{border:0;border-radius:0;box-shadow:none}
-.sf-headwrap .stp-chosen{border:0;border-top:1px solid #F0F0F0;border-radius:0;box-shadow:none;background:#FAFAFA;padding:12px 20px}
-.sf-headicon{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#EEF2FF,#E0E7FF);color:#4338CA;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start}
-.sf-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;background:#fff;border:1px solid #E3E3E3;border-radius:14px;padding:5px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-@media (max-width:560px){.sf-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.sf-step{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:10px;border:0;border-radius:10px;background:transparent;text-align:left;cursor:pointer;color:#303030;transition:background .15s}
-.sf-step:hover{background:#F6F6F7}
-.sf-step.is-on{background:#303030;color:#fff}
-.sf-stepnum{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:#F1F1F1;color:#303030}
-.sf-stepnum.is-done{background:#DCFCE7;color:#047857}
-.sf-step.is-on .sf-stepnum{background:#fff;color:#303030}
-.sf-stepcopy{display:flex;flex-direction:column;min-width:0}
-.sf-stepcopy{width:100%}
-.sf-stepcopy b{font-size:12.5px;font-weight:600;line-height:1.25}
-.sf-stepcopy small{font-size:11.5px;color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sf-step.is-on .sf-stepcopy small{color:rgba(255,255,255,.75)}
+.sf-pagehead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:4px 2px 0}
+.sf-titlerow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sf-h1{font-size:20px;line-height:28px;font-weight:650;margin:0;color:#303030;letter-spacing:-.01em}
+.sf-subtitle{font-size:13px;line-height:20px;font-weight:450;color:#616161;margin:2px 0 0}
+.sf-badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:8px;background:#E3E3E3;color:#303030;font-size:12px;font-weight:550}
+.sf-badge.is-on{background:#CDFEE1;color:#0C5132}
+.sf-switchwrap{display:inline-flex;align-items:center;gap:10px;font-size:13px;font-weight:450;color:#303030;flex-shrink:0;margin-top:4px;cursor:pointer}
+.sf-tabs{display:flex;gap:4px;flex-wrap:wrap;padding:2px 0}
+.sf-tab{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:#616161;font-size:13px;font-weight:550;cursor:pointer;font-family:inherit;transition:background .12s,color .12s}
+.sf-tab:hover{background:#EBEBEB;color:#303030}
+.sf-tab.is-on{background:#fff;color:#303030;box-shadow:0 1px 0 rgba(26,26,26,.07),0 0 0 1px #E3E3E3}
+.sf-tab:focus-visible{outline:2px solid #005BD3;outline-offset:1px}
+.sf-tabbadge{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:6px;background:#E3E3E3;color:#4A4A4A;font-size:11px;font-weight:550}
+.sf-tab.is-on .sf-tabbadge{background:#F1F1F1}
 .sf-panel{display:flex;flex-direction:column;gap:16px}
-.sf-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-@media (max-width:640px){.sf-tiles{grid-template-columns:minmax(0,1fr)}}
-.sf-tile{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid #E3E3E3;border-radius:12px;background:#FAFAFA;transition:border-color .15s,background .15s}
-.sf-tile.is-on{background:#fff;border-color:#C9C9C9;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-.sf-tileicon{width:34px;height:34px;border-radius:10px;background:#F1F1F1;color:#303030;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.sf-tile.is-on .sf-tileicon{background:#EEF2FF;color:#4338CA}
-.sf-tilecopy{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
-.sf-tilecopy b{font-size:13.5px;font-weight:600;color:#303030}
-.sf-tilecopy small{font-size:12.5px;color:#616161;line-height:1.4}
+.sf-cardhead{margin:0 0 16px}
+.sf-cardtitle{font-size:14px;line-height:20px;font-weight:650;margin:0;color:#303030}
+.sf-help{display:block;font-size:13px;line-height:20px;font-weight:450;color:#616161;margin:2px 0 0}
+.sf-features{border:1px solid #EBEBEB;border-radius:10px;overflow:hidden}
+.sf-feature{display:flex;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid #EBEBEB;background:#fff}
+.sf-feature:first-child{border-top:0}
+.sf-featureicon{width:28px;height:28px;border-radius:8px;background:#F1F1F1;color:#4A4A4A;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sf-featurecopy{display:flex;flex-direction:column;flex:1;min-width:0}
+.sf-featurename{font-size:13px;line-height:20px;font-weight:550;color:#303030}
+.sf-featurecopy .sf-help{margin:0}
 .sf-stepnav{display:flex;justify-content:space-between;align-items:center;gap:10px}
-.sf-back,.sf-next,.sf-reset{border-radius:8px;padding:8px 14px;font-size:13px;font-weight:550;cursor:pointer}
+.sf-back,.sf-next,.sf-reset{height:32px;border-radius:8px;padding:0 12px;font-size:13px;font-weight:550;cursor:pointer;font-family:inherit}
 .sf-back{background:transparent;border:0;color:#616161}
-.sf-back:hover{color:#303030}
-.sf-next{background:#fff;border:1px solid #C9C9C9;color:#303030;box-shadow:0 1px 0 rgba(0,0,0,.05)}
-.sf-next:hover{border-color:#8A8A8A}
-.sf-reset{background:#fff;border:1px solid #D4D4D4;color:#303030;margin-top:4px}
-.sf-savebar{position:sticky;bottom:0;z-index:2;background:rgba(246,246,247,.92);backdrop-filter:blur(6px);padding:12px 0;margin:0!important;border-top:1px solid #E3E3E3}
+.sf-back:hover{color:#303030;background:#EBEBEB}
+.sf-next,.sf-reset{background:#fff;border:0;color:#303030;box-shadow:0 1px 0 #E3E3E3,inset 0 -1px 0 #B5B5B5,0 0 0 1px #E3E3E3}
+.sf-next:hover,.sf-reset:hover{background:#F7F7F7}
+.sf-reset{margin-top:4px}
+.sf-savebar{position:sticky;bottom:0;z-index:2;background:rgba(241,241,241,.94);backdrop-filter:blur(6px);padding:12px 0;margin:0!important;border-top:1px solid #E3E3E3}
 @media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static;height:auto!important}.sf-fit{transform:none!important;width:100%!important}}
 `;
 
@@ -790,47 +772,35 @@ export function radiusLabel(v) {
   return n === 0 ? 'Square' : n >= 24 ? 'Round' : `${n} px`;
 }
 
+const FONT = "Inter, -apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif";
+const CARD_SHADOW = '0 1px 0 0 rgba(26,26,26,.07), inset 0 -1px 0 0 rgba(0,0,0,.08), inset 1px 0 0 0 rgba(0,0,0,.04), inset -1px 0 0 0 rgba(0,0,0,.04), inset 0 1px 0 0 rgba(255,255,255,.9)';
 const ui = {
-  page: { fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif", WebkitFontSmoothing: 'antialiased', color: '#303030', maxWidth: 1280, margin: '0 auto', padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 },
-  head: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 },
-  h1: { fontSize: 20, fontWeight: 550, margin: '0 0 4px', color: '#303030' },
-  card: { background: '#fff', border: '1px solid #E3E3E3', borderRadius: 12, padding: 20, boxShadow: '0 1px 2px rgba(0,0,0,.04)' },
-  label: { fontWeight: 550, fontSize: 14, color: '#4A4A4A', margin: '0 0 6px' },
-  muted: { fontSize: 13, color: '#616161', margin: '4px 0 12px' },
-  field: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: '#303030', fontWeight: 500, marginBottom: 16 },
-  input: { height: 36, padding: '0 10px', border: '1px solid #D4D4D4', borderRadius: 8, fontSize: 14, width: '100%', maxWidth: 420, background: '#fff', color: '#303030' },
-  color: { width: 36, height: 36, border: '1px solid #D1D5DB', borderRadius: 6, padding: 2 },
-  row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 },
-  seg: { display: 'inline-flex', gap: 4, marginLeft: 'auto' },
-  segOn: { background: '#303030', color: '#fff', border: '1px solid #303030', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer' },
-  segOff: { background: '#fff', color: '#303030', border: '1px solid #D4D4D4', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer' },
+  page: { fontFamily: FONT, WebkitFontSmoothing: 'antialiased', color: '#303030', fontSize: 13, fontWeight: 450, maxWidth: 1280, margin: '0 auto', padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 },
+  card: { background: '#fff', borderRadius: 12, padding: 16, boxShadow: CARD_SHADOW },
+  muted: { fontSize: 13, color: '#616161', margin: '4px 0 12px', fontWeight: 450 },
+  field: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, lineHeight: '20px', color: '#303030', fontWeight: 450, marginBottom: 14 },
+  input: { height: 32, padding: '0 12px', border: '1px solid #8A8A8A', borderRadius: 8, fontSize: 13, fontWeight: 450, width: '100%', maxWidth: 420, background: '#FDFDFD', color: '#303030', fontFamily: 'inherit' },
+  color: { width: 32, height: 32, border: '1px solid #8A8A8A', borderRadius: 8, padding: 2, background: '#fff' },
+  row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 },
+  seg: { display: 'inline-flex', gap: 0, marginLeft: 'auto', background: '#F1F1F1', borderRadius: 8, padding: 2 },
+  segOn: { background: '#fff', color: '#303030', border: 0, borderRadius: 6, padding: '0 12px', height: 28, fontSize: 13, fontWeight: 550, cursor: 'pointer', boxShadow: '0 1px 0 rgba(26,26,26,.07), 0 0 0 1px #E3E3E3', fontFamily: 'inherit' },
+  segOff: { background: 'transparent', color: '#616161', border: 0, borderRadius: 6, padding: '0 12px', height: 28, fontSize: 13, fontWeight: 550, cursor: 'pointer', fontFamily: 'inherit' },
   table: { width: '100%', borderCollapse: 'collapse', marginBottom: 8 },
-  th: { textAlign: 'left', padding: '8px 6px', fontSize: 11, color: '#616161', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid #E3E3E3' },
-  td: { padding: '6px' },
-  cell: { width: '100%', maxWidth: 110, height: 34, padding: '0 8px', border: '1px solid #D4D4D4', borderRadius: 8, fontSize: 14 },
-  remove: { background: 'none', border: 'none', color: '#8A8A8A', cursor: 'pointer', fontSize: 14 },
-  add: { background: '#fff', border: '1px dashed #C9C9C9', borderRadius: 8, color: '#303030', cursor: 'pointer', fontSize: 13, fontWeight: 500, padding: '8px 14px', marginTop: 4 },
-  save: { background: '#303030', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 1px 0 rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.12)' },
-  ok: { fontSize: 13, color: '#059669' },
-  error: { fontSize: 13, color: '#DC2626' },
-  pill: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 500, borderRadius: 999, padding: '3px 10px' },
-  pillOn: { background: '#ECFDF5', color: '#065F46' },
-  pillOff: { background: '#FFF7ED', color: '#9A3412' },
-  dot: { width: 7, height: 7, borderRadius: '50%' },
-  sectionHead: { display: 'flex', gap: 12, alignItems: 'flex-start', margin: '0 0 16px', flex: 1, minWidth: 0 },
-  sectionIcon: { width: 34, height: 34, borderRadius: 10, background: '#F1F1F1', color: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  sectionTitle: { display: 'block', fontSize: 15, fontWeight: 600, color: '#303030' },
-  sectionText: { display: 'block', fontSize: 13, color: '#616161', marginTop: 2 },
-  group: { fontSize: 12.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#303030', margin: '8px 0 10px' },
-  toggles: { display: 'flex', flexDirection: 'column', gap: 8 },
-  toggleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, background: '#F7F7F7', borderRadius: 10, padding: '10px 12px' },
-  offCard: { background: '#fff', border: '1px dashed #C9C9C9', borderRadius: 12, padding: '36px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },
-  offIcon: { width: 56, height: 56, borderRadius: '50%', background: '#F1F1F1', color: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  offTitle: { fontSize: 16, fontWeight: 600, margin: 0, color: '#303030' },
-  offText: { fontSize: 13.5, color: '#616161', margin: '0 0 6px', maxWidth: 440, lineHeight: 1.5 },
-  tip: { fontSize: 12.5, color: '#616161', background: '#F7F7F7', borderRadius: 8, padding: '8px 12px', margin: '0 0 14px' },
-  switchWrap: { display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 },
-  switchText: { fontSize: 13, fontWeight: 600 },
-  toggle: { position: 'relative', display: 'inline-flex', alignItems: 'center', width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer' },
-  knob: { position: 'absolute', left: 2, width: 20, height: 20, background: '#fff', borderRadius: '50%', transition: 'transform 0.2s' },
+  th: { textAlign: 'left', padding: '8px 6px', fontSize: 12, color: '#616161', fontWeight: 550, borderBottom: '1px solid #E3E3E3', background: '#F7F7F7' },
+  td: { padding: '6px', borderBottom: '1px solid #F1F1F1' },
+  cell: { width: '100%', maxWidth: 110, height: 32, padding: '0 10px', border: '1px solid #8A8A8A', borderRadius: 8, fontSize: 13, background: '#FDFDFD', fontFamily: 'inherit' },
+  remove: { background: 'none', border: 'none', color: '#8A8A8A', cursor: 'pointer', fontSize: 13, width: 28, height: 28, borderRadius: 6 },
+  add: { background: '#fff', border: 0, borderRadius: 8, color: '#303030', cursor: 'pointer', fontSize: 13, fontWeight: 550, height: 32, padding: '0 12px', marginTop: 6, boxShadow: '0 1px 0 #E3E3E3, inset 0 -1px 0 #B5B5B5, 0 0 0 1px #E3E3E3', fontFamily: 'inherit' },
+  save: { background: 'linear-gradient(180deg,#3B3B3B,#303030)', color: '#fff', border: 'none', borderRadius: 8, height: 32, padding: '0 16px', fontWeight: 550, fontSize: 13, cursor: 'pointer', boxShadow: '0 -1px 0 1px rgba(0,0,0,.8) inset, 0 0 0 1px #303030 inset, 0 .5px 0 1.5px rgba(255,255,255,.25) inset', fontFamily: 'inherit' },
+  ok: { fontSize: 13, color: '#0C5132', fontWeight: 450 },
+  error: { fontSize: 13, color: '#8E1F0B', fontWeight: 450 },
+  group: { fontSize: 13, lineHeight: '20px', fontWeight: 650, color: '#303030', margin: '6px 0 8px', paddingTop: 12, borderTop: '1px solid #EBEBEB' },
+  offCard: { background: '#fff', borderRadius: 12, padding: '32px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, boxShadow: CARD_SHADOW },
+  offIcon: { width: 44, height: 44, borderRadius: 12, background: '#F1F1F1', color: '#4A4A4A', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  offTitle: { fontSize: 14, fontWeight: 650, margin: 0, color: '#303030' },
+  offText: { fontSize: 13, color: '#616161', margin: '0 0 8px', maxWidth: 440, lineHeight: '20px' },
+  tip: { fontSize: 13, lineHeight: '20px', color: '#616161', background: '#F7F7F7', borderRadius: 8, padding: '8px 12px', margin: '0 0 14px' },
+  toggle: { position: 'relative', display: 'inline-flex', alignItems: 'center', width: 32, height: 18, borderRadius: 9, border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 },
+  knob: { position: 'absolute', left: 2, width: 14, height: 14, background: '#fff', borderRadius: '50%', transition: 'transform 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,.2)' },
 };
+

@@ -270,7 +270,8 @@ describe('size advisor words and options', () => {
     fireEvent.focus(screen.getByLabelText('Man label'));
     fireEvent.change(screen.getByLabelText('Man label'), { target: { value: 'Gents' } });
     expect(frame()).toHaveTextContent('Gents');
-    expect(screen.getByRole('tab', { name: /^Words/ })).toHaveTextContent('1 changed');
+    expect(screen.getByRole('tab', { name: /^Words/ })).toHaveAttribute('title', '1 changed');
+    expect(screen.getByRole('tab', { name: /^Words/ })).toHaveTextContent('Edited');
     goStep('Size chart');
     expect(screen.getByRole('button', { name: 'Gents (1)' })).toBeInTheDocument(); // chart tab follows
     goStep('Words');
@@ -294,7 +295,8 @@ describe('size advisor words and options', () => {
     const { container } = render(<SizeFinderScreen shop={SHOP} />);
     await screen.findByLabelText('Recommended size');
     goStep('Shopper features');
-    expect(screen.getByRole('tab', { name: /^Shopper features/ })).toHaveTextContent('4 of 4 on');
+    expect(screen.getByRole('tab', { name: /^Shopper features/ })).toHaveAttribute('title', '4 of 4 on');
+    expect(screen.getByRole('tab', { name: /^Shopper features/ })).toHaveTextContent('4/4');
     fireEvent.click(screen.getByRole('switch', { name: 'Show Likely size' }));
     expect(container.querySelector('.sfp-live')).toBeNull();
     fireEvent.click(screen.getByRole('switch', { name: 'Show Add to cart button' }));
@@ -331,16 +333,18 @@ describe('on / off', () => {
 });
 
 describe('steps', () => {
-  it('five steps with a live status; one step open at a time; Next / back; the preview follows the step', async () => {
+  it('five tabs with a short badge and the full status on hover; one step open at a time; Next / back; the preview follows the step', async () => {
     await renderScreen();
     await screen.findByLabelText('Recommended size');
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((t) => t.querySelector('b').textContent)).toEqual(['Size chart', 'Button', 'Shopper features', 'Words', 'Go live']);
+    expect(tabs.map((t) => t.querySelector('.sf-tabname').textContent)).toEqual(['Size chart', 'Button', 'Shopper features', 'Words', 'Go live']);
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
-    expect(tabs[0]).toHaveTextContent('3 sizes');
-    expect(tabs[1]).toHaveTextContent('Outline · Round');
-    expect(tabs[3]).toHaveTextContent('Default words');
-    expect(tabs[4]).toHaveTextContent('All products with sizes');
+    expect(tabs[0]).toHaveTextContent('Size chart3');
+    expect(tabs[0]).toHaveAttribute('title', '3 sizes');
+    expect(tabs[1]).toHaveAttribute('title', 'Outline · Round');
+    expect(tabs[3]).toHaveAttribute('title', 'Default words');
+    expect(tabs[3]).toHaveTextContent(/^Words$/);
+    expect(tabs[4]).toHaveAttribute('title', 'All products with sizes');
 
     // Size chart → only the size preview
     expect(screen.getByRole('tabpanel', { name: 'Size chart' })).toBeInTheDocument();
@@ -364,7 +368,7 @@ describe('steps', () => {
     expect(screen.getByLabelText('Product tag')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Next:/ })).toBeNull();
     fireEvent.change(screen.getByLabelText('Product tag'), { target: { value: 'sizes' } });
-    expect(screen.getByRole('tab', { name: /^Go live/ })).toHaveTextContent('Tag: sizes');
+    expect(screen.getByRole('tab', { name: /^Go live/ })).toHaveAttribute('title', 'Tag: sizes');
   });
 
   it('Words: Reset to default words appears once a word is changed and puts them back', async () => {

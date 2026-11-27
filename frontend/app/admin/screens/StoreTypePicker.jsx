@@ -157,7 +157,7 @@ export function StoreTypeCard({ type, onChange }) {
   return (
     <section className="stp-chosen" aria-label="Your store type">
       <style>{CSS}</style>
-      <TypeIcon id={type.id} size={44} />
+      <TypeIcon id={type.id} size={36} />
       <span className="stp-rcopy">
         <small className="stp-k">Your store sells</small>
         <b>{type.name}</b>
@@ -198,8 +198,8 @@ const CSS = `
 .stp *,.stp-chosen *,.stp-nn *{box-sizing:border-box}
 .stp{background:#fff;border:1px solid #E3E3E3;border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
 .stp-hero{padding:28px 28px 22px;background:radial-gradient(120% 140% at 0% 0%,#EEF2FF 0,#fff 55%),#fff;border-bottom:1px solid #F0F0F0;position:relative}
-.stp-badge{display:inline-block;font-size:11.5px;font-weight:600;color:#4338CA;background:#E0E7FF;border-radius:999px;padding:3px 10px}
-.stp-h{font-size:22px;font-weight:650;margin:10px 0 4px;color:#1F2937;letter-spacing:-.01em}
+.stp-badge{display:inline-flex;align-items:center;height:20px;font-size:12px;font-weight:550;color:#303030;background:#E3E3E3;border-radius:8px;padding:0 8px}
+.stp-h{font-size:18px;line-height:26px;font-weight:650;margin:10px 0 2px;color:#303030;letter-spacing:-.01em}
 .stp-sub{font-size:13.5px;color:#616161;margin:0 0 16px;max-width:560px;line-height:1.5}
 .stp-searchwrap{position:relative;max-width:620px}
 .stp-sicon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#6B7280;display:flex}
@@ -211,25 +211,28 @@ const CSS = `
 .stp-result{display:flex;align-items:center;gap:12px;width:100%;padding:10px;border:0;border-radius:9px;background:transparent;text-align:left;cursor:pointer;color:#111}
 .stp-result.is-active{background:#F5F5FF}
 .stp-rcopy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
-.stp-rcopy b{font-size:14px;font-weight:600;color:#1F2937}
-.stp-rcopy small{font-size:12.5px;color:#6B7280}
+.stp-rcopy b{font-size:13px;line-height:20px;font-weight:550;color:#303030}
+.stp-rcopy small{font-size:13px;line-height:20px;color:#616161;font-weight:450}
 .stp-match{font-size:11.5px;color:#4338CA;background:#EEF2FF;border-radius:999px;padding:3px 9px;white-space:nowrap}
 .stp-none{font-size:13px;color:#6B7280;margin:0;padding:12px}
 .stp-try{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.5px;color:#6B7280;margin:12px 0 0}
 .stp-chip{border:1px solid #E5E7EB;background:#fff;border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:500;color:#303030;cursor:pointer}
 .stp-chip:hover{border-color:#9CA3AF}
 .stp-all{padding:18px 28px 24px}
-.stp-alltitle{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#6B7280;margin:0 0 10px}
+.stp-alltitle{font-size:13px;font-weight:650;color:#303030;margin:0 0 10px}
 .stp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
 .stp-card{position:relative;display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}
 .stp-card:hover{border-color:#A5B4FC;box-shadow:0 2px 8px rgba(79,70,229,.08)}
 .stp-card.is-current{border-color:#4F46E5;box-shadow:0 0 0 1px #4F46E5}
 .stp-cur{position:absolute;top:8px;right:8px;font-size:10.5px;font-weight:600;color:#4338CA;background:#EEF2FF;border-radius:999px;padding:2px 7px}
 .stp-cancel{margin-top:14px;background:#fff;border:1px solid #D4D4D4;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:500;cursor:pointer}
-.stp-chosen{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #E3E3E3;border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-.stp-k{font-size:11px!important;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#8A8A8A!important}
-.stp-change{margin-left:auto;background:#fff;border:1px solid #D4D4D4;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:550;color:#303030;cursor:pointer}
-.stp-change:hover{border-color:#9CA3AF}
+.stp-chosen{display:flex;align-items:center;gap:12px;background:#fff;border-radius:12px;padding:12px 16px;box-shadow:0 1px 0 0 rgba(26,26,26,.07),inset 0 -1px 0 0 rgba(0,0,0,.08),inset 1px 0 0 0 rgba(0,0,0,.04),inset -1px 0 0 0 rgba(0,0,0,.04)}
+.stp-chosen .stp-rcopy{gap:0}
+.stp-chosen .stp-rcopy b{font-size:13px;font-weight:650;line-height:20px;color:#303030}
+.stp-chosen .stp-rcopy small{font-size:13px;line-height:20px;color:#616161;font-weight:450}
+.stp-k{font-size:12px!important;font-weight:450!important;color:#616161!important;text-transform:none;letter-spacing:0}
+.stp-change{margin-left:auto;height:32px;background:#fff;border:0;border-radius:8px;padding:0 12px;font-size:13px;font-weight:550;color:#303030;cursor:pointer;font-family:inherit;box-shadow:0 1px 0 #E3E3E3,inset 0 -1px 0 #B5B5B5,0 0 0 1px #E3E3E3}
+.stp-change:hover{background:#F7F7F7}
 .stp-nn{background:#fff;border:1px solid #E3E3E3;border-radius:16px;padding:32px 28px;text-align:center;display:flex;flex-direction:column;align-items:center}
 .stp-nn .stp-sub{margin:0 auto 18px}
 .stp-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;width:100%;max-width:720px;text-align:left}

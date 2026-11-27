@@ -524,26 +524,26 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
 }
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-.sfp{font-family:Inter,-apple-system,BlinkMacSystemFont,'San Francisco','Segoe UI',Roboto,'Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;background:#fff;border:1px solid #E3E3E3;border-radius:14px;padding:16px;color:#111;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap');
+.sfp{font-family:Inter,-apple-system,BlinkMacSystemFont,'San Francisco','Segoe UI',Roboto,'Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;background:#fff;border-radius:12px;padding:16px;color:#111;box-shadow:0 1px 0 0 rgba(26,26,26,.07),inset 0 -1px 0 0 rgba(0,0,0,.08),inset 1px 0 0 0 rgba(0,0,0,.04),inset -1px 0 0 0 rgba(0,0,0,.04)}
 .sfp *{box-sizing:border-box}
 .sfp p{margin:0}
 .sfp button{font-family:inherit}
 .sfp-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
-.sfp-label{font-weight:600;font-size:14px}
-.sfp-muted{font-size:12px;color:#6B6B6B}
+.sfp-label{font-weight:650;font-size:14px;line-height:20px;color:#303030}
+.sfp-muted{font-size:13px;line-height:20px;color:#616161;font-weight:450}
 .sfp-dev,.sfp-views{display:inline-flex;background:#F1F1F1;border-radius:8px;padding:3px;flex-shrink:0}
 .sfp-views{flex-wrap:wrap}
-.sfp-dev button,.sfp-views button{border:0;background:transparent;border-radius:6px;padding:5px 9px;font-size:11.5px;font-weight:500;color:#616161;cursor:pointer}
-.sfp-dev button[aria-pressed="true"],.sfp-views button[aria-pressed="true"]{background:#fff;color:#111;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.sfp-dev button,.sfp-views button{border:0;background:transparent;border-radius:6px;height:26px;padding:0 10px;font-size:12px;font-weight:550;color:#616161;cursor:pointer}
+.sfp-dev button[aria-pressed="true"],.sfp-views button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 0 rgba(26,26,26,.07),0 0 0 1px #E3E3E3}
 .sfp-both{background:none;border:0;padding:0;font-size:12px;font-weight:600;color:#303030;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
-.sfp-sample{font-size:12px;color:#8A8A8A;margin:10px 2px 0}
+.sfp-sample{font-size:12px;color:#616161;margin:10px 2px 0;font-weight:450}
 .sfp-stage{display:flex;flex-direction:column;gap:14px}
-.sfp-block{background:#F4F4F2;border-radius:12px;padding:14px}
+.sfp-block{background:#F7F7F7;border-radius:10px;padding:14px}
 .sfp-blockhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
-.sfp-blocktitle{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:#303030;margin:0 0 10px}
+.sfp-blocktitle{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:#303030;margin:0 0 10px}
 .sfp-blockhead .sfp-blocktitle{margin:0}
-.sfp-blocktitle span{width:20px;height:20px;border-radius:50%;background:#303030;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
+.sfp-blocktitle span{display:none}
 .sfp-cardbox{background:#fff;border-radius:10px;padding:14px;max-width:440px;margin:0 auto}
 .sfp-frame{max-width:380px;margin:0 auto;border-radius:20px;overflow:hidden;box-shadow:0 18px 40px rgba(0,0,0,.14);border:1px solid #E7E7E5;background:#fff}
 .sfp-stage.is-mobile .sfp-cardbox{max-width:340px}
