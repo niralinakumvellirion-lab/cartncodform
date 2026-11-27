@@ -119,6 +119,29 @@ function Garment({ id }) {
   );
 }
 
+// Sample sneaker in the shoes preview (on the store the upper is the product's own photo) — same shape as ccf-size.js.
+function SampleShoe() {
+  const upper = 'M30 92C28 72 33 56 50 49L70 45C79 35 92 31 104 34L113 40C127 52 150 60 176 66C194 70 205 79 205 90L205 92Z';
+  return (
+    <svg className="sfp-shoe" data-kind="sneaker" viewBox="0 0 230 124" aria-hidden="true">
+      <defs>
+        <pattern id="sfpshoef" width="6" height="6" patternUnits="userSpaceOnUse">
+          <rect width="6" height="6" fill="#3E6E8E" /><path d="M0 3H6M3 0V6" stroke="#fff" strokeOpacity=".08" strokeWidth="1" />
+        </pattern>
+        <linearGradient id="sfpshoes" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity=".22" /><stop offset=".45" stopColor="#fff" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity=".26" />
+        </linearGradient>
+        <radialGradient id="sfpshoeg" cx=".5" cy=".5" r=".5"><stop offset="0" stopColor="#000" stopOpacity=".22" /><stop offset="1" stopColor="#000" stopOpacity="0" /></radialGradient>
+      </defs>
+      <ellipse cx="117" cy="110" rx="96" ry="7" fill="url(#sfpshoeg)" />
+      <path d="M24 91H207C212 91 213 97 211 101C209 105 204 107 198 107H34C28 107 23 103 23 98C23 94 22 91 24 91Z" fill="#F6F5F2" stroke="#000" strokeOpacity=".22" strokeWidth=".8" />
+      <path d={upper} fill="url(#sfpshoef)" /><path d={upper} fill="url(#sfpshoes)" />
+      <path d={upper} fill="none" stroke="#000" strokeOpacity=".3" strokeWidth=".9" strokeLinejoin="round" />
+      <path d="M50 49C59 56 73 58 87 52M108 41L114 50M117 45L122 55M126 50L131 59M135 54L139 63M144 58L147 66M168 67C185 71 197 79 203 89M33 72C33 61 37 54 44 50M62 80C96 86 140 86 182 78M30 97H205" fill="none" stroke="#000" strokeOpacity=".24" strokeWidth="1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function Mannequin({ heightCm, weightKg, build = 'average', h = 120, dressed = false }) {
   const s = figureScale(heightCm, weightKg, build);
   return (
@@ -369,8 +392,28 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {!error && result && (
               <>
                 <div className="sfp-result">
-                  <div className="sfp-pvis">
+                  <div className={`sfp-pvis${storeType === 'shoes' ? ' is-shoe' : ''}`}>
+                    {storeType === 'shoes' ? (
+                      <>
+                        <span className="sfp-wearing"><i />Wearing {result.size}</span>
+                        <SampleShoe />
+                        {(() => {
+                          const row = chart.find((c) => String(c.size) === String(result.size));
+                          if (!row) return null;
+                          const v = Math.round((row.value - measure.start) * 10) / 10;
+                          const zone = v < 0 ? 'tight' : v <= 1 ? 'right' : 'roomy';
+                          const pos = Math.max(4, Math.min(96, ((v + 1) / 3) * 100));
+                          return (
+                            <div className={`sfp-toe is-${zone}`}>
+                              <div className="sfp-toebar"><span className="is-tight" /><span className="is-right" /><span className="is-roomy" /><i style={{ left: `${pos}%` }} /></div>
+                              <p>{v < 0 ? `${Math.abs(v)} cm shorter than your foot — tight` : `${v} cm toe room — ${zone === 'right' ? 'just right' : 'roomy'}`}</p>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    ) : (
                     <span className="sfp-pimg"><I s={30} w={1.4}>{TYPE_ICON[storeType]}</I></span>
+                    )}
                     <span className="sfp-me">{baby ? `${measureLabel(baby.length.start, 'cm')} · ${measureLabel(baby.weight.start, 'kg')}` : `${measure.value.split(' ')[0]} ${measureLabel(measure.start, measure.unit)}`}</span>
                   </div>
                   <div>
@@ -738,6 +781,15 @@ const CSS = `
 .sfp-howto b{font-size:10.5px}
 .sfp-howto ol{margin:4px 0 0;padding-left:15px;display:flex;flex-direction:column;gap:2px;line-height:1.35}
 .sfp-pvis{position:relative;border-radius:14px;background:radial-gradient(120% 70% at 50% 18%,#FFFFFF 0,#F4F3F0 55%,#E9E7E2 100%);min-height:170px;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
+.sfp-pvis.is-shoe{flex-direction:column;gap:6px;padding:28px 8px 30px}
+.sfp-shoe{width:100%;max-width:170px;height:auto;filter:drop-shadow(0 3px 6px rgba(0,0,0,.08))}
+.sfp-toe{width:100%;max-width:150px}
+.sfp-toebar{position:relative;display:flex;gap:2px;height:4px}
+.sfp-toebar span{flex:1;border-radius:3px;opacity:.35}
+.sfp-toebar .is-tight{background:#F87171}.sfp-toebar .is-right{background:#22C55E}.sfp-toebar .is-roomy{background:#F59E0B}
+.sfp-toe.is-tight .is-tight,.sfp-toe.is-right .is-right,.sfp-toe.is-roomy .is-roomy{opacity:1}
+.sfp-toebar i{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:#fff;border:2px solid #111}
+.sfp-toe p{margin:5px 0 0 !important;text-align:center;font-size:8.5px;font-weight:600;color:#374151}
 .sfp-pimg{width:76px;height:76px;border-radius:18px;background:linear-gradient(135deg,#E9E4DA,#D8D0C2);display:flex;align-items:center;justify-content:center;color:#6B5B45}
 .sfp-fit{font-size:9.5px;color:#4B5563;margin:2px 0 0 !important}
 .sfp-loading{padding:18px 0;text-align:center}

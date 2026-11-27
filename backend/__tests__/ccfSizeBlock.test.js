@@ -541,7 +541,13 @@ describe('ccf-size.js — measure stores', () => {
     expect(recommendBodies.at(-1)).toEqual({ value: 25, remember: false, sessionId: '' });
     expect(q('.ccf-sf-big b').textContent).toBe('7');
     expect(q('.ccf-sf-fit').textContent).toBe('True to size, with a little toe room');
-    expect(q('.ccf-sf-pvis img').src).toBe('https://cdn.shopify.com/s.jpg');
+    // The product is shown as a shoe (Canvas Sneakers → sneaker) filled with its photo, with a toe-room meter.
+    expect(q('.ccf-sf-pvis.is-shoe .ccf-sf-shoe').getAttribute('data-kind')).toBe('sneaker');
+    expect(q('.ccf-sf-shoe pattern image').getAttribute('href')).toBe('https://cdn.shopify.com/s.jpg');
+    expect(q('.ccf-sf-pvis .ccf-sf-wearing').textContent).toBe('Wearing 7');
+    expect(q('.ccf-sf-toetext').textContent).toBe('0.4 cm toe room — just right');
+    expect(q('.ccf-sf-toe').classList.contains('is-right')).toBe(true);
+    expect(q('.ccf-sf-pvis').getAttribute('aria-label')).toBe('Canvas Sneakers in size 7');
     expect(q('.ccf-sf-avatar')).toBeNull();
     expect(q('.ccf-sf-me').textContent).toBe('Foot 25 cm');
     const sizes = Array.from(document.querySelectorAll('.ccf-sf-size')).map((x) => x.textContent);
@@ -706,5 +712,29 @@ describe('ccf-size.js — add to cart on themes with several cart forms', () => 
       </div>` });
     await toResult('Woman');
     expect(q('.ccf-sf-main').textContent).toBe('Add to cart');
+  });
+});
+
+describe('ccf-size.js — shoes worn in a shoe shape', () => {
+  test('shoe kind from title / type / tags; unknown → sneaker', async () => {
+    await load();
+    const kind = window.__ccfSizeFinder.shoeKind;
+    expect(kind('Chelsea Leather Boots', '', '')).toBe('boot');
+    expect(kind('Block Heel Pumps', '', '')).toBe('heel');
+    expect(kind('Kolhapuri Chappal', '', '')).toBe('sandal');
+    expect(kind('Comfy Slides', '', '')).toBe('slider');
+    expect(kind('Embroidered Jutti', '', '')).toBe('loafer');
+    expect(kind('Daily Runner', 'Running Shoes', '')).toBe('sneaker');
+    expect(kind('Something', '', '')).toBe('sneaker');
+  });
+
+  test('toe room: tight / just right / roomy with the marker position', async () => {
+    await load();
+    const toe = window.__ccfSizeFinder.toeRoom;
+    expect(toe(-0.3)).toMatchObject({ zone: 'tight', text: '0.3 cm shorter than your foot — tight' });
+    expect(toe(0.4)).toMatchObject({ zone: 'right', text: '0.4 cm toe room — just right' });
+    expect(toe(1.6)).toMatchObject({ zone: 'roomy', text: '1.6 cm toe room — roomy' });
+    expect(toe(0.5).pos).toBe(50);
+    expect(toe(9).pos).toBe(96);
   });
 });

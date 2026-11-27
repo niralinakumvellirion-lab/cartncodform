@@ -271,6 +271,15 @@
       '.ccf-sf-pvis .ccf-sf-picon{width:84px;height:84px;border-radius:22px;background:#EDE8E0;color:#6B5B45;display:flex;align-items:center;justify-content:center}',
       '.ccf-sf-pvis .ccf-sf-picon svg{width:40px;height:40px}',
       '.ccf-sf-pvis .ccf-sf-me{position:absolute;left:8px;right:8px;bottom:10px;display:flex;justify-content:center}',
+      '.ccf-sf-pvis.is-shoe{flex-direction:column;justify-content:center;gap:10px;padding:46px 12px 44px}',
+      '.ccf-sf-pvis .ccf-sf-shoe{width:100%;max-width:250px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
+      '.ccf-sf-toe{width:100%;max-width:220px}',
+      '.ccf-sf-toebar{position:relative;display:flex;height:6px;border-radius:6px;overflow:visible;gap:2px}',
+      '.ccf-sf-toezone{flex:1;border-radius:4px;opacity:.35}',
+      '.ccf-sf-toezone.is-tight{background:#F87171}.ccf-sf-toezone.is-right{background:#22C55E}.ccf-sf-toezone.is-roomy{background:#F59E0B}',
+      '.ccf-sf-toe.is-tight .is-tight,.ccf-sf-toe.is-right .is-right,.ccf-sf-toe.is-roomy .is-roomy{opacity:1}',
+      '.ccf-sf-toemark{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#fff;border:2.5px solid #111;box-shadow:0 1px 3px rgba(0,0,0,.25)}',
+      '.ccf-sf-toetext{margin:7px 0 0;text-align:center;font-size:11.5px;font-weight:600;color:#374151}',
       '@media (max-width:640px){.ccf-sf-panel{left:0;right:0;top:auto;bottom:0;width:100%;max-height:92vh;border-radius:22px 22px 0 0;transform:translateY(100%);opacity:1}.ccf-sf-panel.is-open{transform:translateY(0)}.ccf-sf-panel .ccf-sf-grab{display:block;width:38px;height:4px;border-radius:4px;background:#D1D5DB;margin:8px auto 0}.ccf-sf-body{padding:4px 18px 8px}.ccf-sf-foot{padding:10px 18px 16px}.ccf-sf-avatar{min-height:230px}.ccf-sf-big b{font-size:30px}}',
       '@media (prefers-reduced-motion:reduce){.ccf-sf-panel,.ccf-sf-overlay,.ccf-sf-stage svg,.ccf-sf-bar span{transition:none!important;animation:none!important}}',
     ].join('');
@@ -487,6 +496,103 @@
     return out + '</g>';
   }
 
+  // ── Shoes "worn" in a shoe shape (shoes & footwear stores) ──
+  // Side view, toe to the right, viewBox 220×120 (ground at y≈106). The upper is filled with the product
+  // photo (centre crop), shaded, on a sole, with details. Same idea as the clothes on the avatar.
+  var SHOES = {
+    sneaker: {
+      upper: ['M30 92C28 72 33 56 50 49L70 45C79 35 92 31 104 34L113 40C127 52 150 60 176 66C194 70 205 79 205 90L205 92Z'],
+      sole: 'M24 91H207C212 91 213 97 211 101C209 105 204 107 198 107H34C28 107 23 103 23 98C23 94 22 91 24 91Z',
+      soleFill: '#F6F5F2',
+      detail: 'M50 49C59 56 73 58 87 52M108 41L114 50M117 45L122 55M126 50L131 59M135 54L139 63M144 58L147 66M168 67C185 71 197 79 203 89M33 72C33 61 37 54 44 50M62 80C96 86 140 86 182 78M30 97H205',
+    },
+    boot: {
+      upper: ['M40 92L40 30C40 22 46 17 55 17L92 17C99 17 103 22 103 30L105 58C126 63 160 67 180 73C196 78 205 84 205 92Z'],
+      sole: 'M34 91H207C212 91 212 99 208 102C205 105 201 107 196 107H66V101H44V107H36C31 107 30 99 34 91Z',
+      soleFill: '#3F3A36',
+      detail: 'M97 24V58M93 22H101M45 26H98M44 92V40M105 62C128 70 160 74 196 82M40 97H205',
+    },
+    heel: {
+      upper: ['M56 76C64 63 82 58 102 62L150 70C171 74 190 81 202 90L203 94H152C134 86 104 84 82 89C72 91 63 88 56 76Z'],
+      sole: 'M52 74L47 106H54L62 86ZM150 93H204C207 93 207 97 204 98H150Z',
+      soleFill: '#2F2B28',
+      detail: 'M82 89C104 82 132 84 152 93M102 62C112 70 128 74 146 72M60 82L56 104',
+    },
+    sandal: {
+      upper: ['M44 96C44 76 52 64 64 59L69 66C60 71 55 81 55 96Z', 'M70 96C76 72 94 64 114 70L109 77C94 72 80 79 80 96Z', 'M138 96C148 80 171 78 186 90L180 95C170 87 155 87 149 96Z'],
+      sole: 'M28 95H205C211 95 212 104 205 106H36C27 106 24 96 28 95Z',
+      soleFill: '#C7A27E',
+      detail: 'M30 100H205M60 63L66 64M86 71L92 73M158 85L163 88',
+    },
+    slider: {
+      upper: ['M96 96C100 72 150 64 178 78C186 84 189 91 189 96Z'],
+      sole: 'M26 95H207C213 95 214 104 207 106H34C25 106 22 96 26 95Z',
+      soleFill: '#D9D4CC',
+      detail: 'M28 100H206M104 88C130 80 160 80 182 88M120 74L122 95M150 70V95',
+    },
+    loafer: {
+      upper: ['M34 92C32 78 40 66 56 62L100 60C130 62 168 68 192 78C202 84 206 90 206 94Z'],
+      sole: 'M28 92H208C212 92 213 98 210 101C207 105 202 106 197 106H64V101H40V106H34C28 106 26 98 28 92Z',
+      soleFill: '#4A3A2E',
+      detail: 'M112 64C134 60 168 66 186 78M110 67L134 65M118 64V70M56 62C70 70 90 72 104 66M34 97H208',
+    },
+  };
+  var SHOE_WORDS = [
+    ['boot', ['boot', 'boots', 'chelsea', 'chukka', 'ankle boot']],
+    ['heel', ['heel', 'heels', 'stiletto', 'pump', 'pumps', 'wedge', 'wedges', 'block heel']],
+    ['sandal', ['sandal', 'sandals', 'floaters', 'gladiator', 'kolhapuri']],
+    ['slider', ['slider', 'sliders', 'slides', 'slipper', 'slippers', 'chappal', 'chappals', 'flip', 'flops', 'crocs', 'clogs']],
+    ['loafer', ['loafer', 'loafers', 'formal', 'oxford', 'derby', 'brogue', 'brogues', 'moccasin', 'jutti', 'juttis', 'mojari', 'ballerina', 'flats']],
+    ['sneaker', ['sneaker', 'sneakers', 'running', 'sports', 'trainer', 'trainers', 'canvas', 'shoe', 'shoes']],
+  ];
+  function shoeKind(title, type, tags) {
+    var t = ' ' + [title, type, tags].join(' ').toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
+    for (var i = 0; i < SHOE_WORDS.length; i++) {
+      for (var j = 0; j < SHOE_WORDS[i][1].length; j++) {
+        if (t.indexOf(' ' + SHOE_WORDS[i][1][j] + ' ') !== -1) return SHOE_WORDS[i][0];
+      }
+    }
+    return 'sneaker';
+  }
+  // shoe = { kind, image, fit } — fit: −2…2 steps from the recommended size (a size longer / shorter).
+  function shoeSvg(shoe) {
+    var g = SHOES[shoe.kind] || SHOES.sneaker;
+    var n = Math.floor(Math.random() * 1e6);
+    var fab = 'ccfsfsfab' + n, sh = 'ccfsfssh' + n, gl = 'ccfsfsgl' + n;
+    var f = Math.max(-2, Math.min(2, shoe.fit || 0));
+    var sx = (1 + 0.035 * f).toFixed(3);
+    var out = '<svg class="ccf-sf-shoe" data-kind="' + shoe.kind + '" viewBox="0 0 230 124" aria-hidden="true">' +
+      '<defs>' +
+      '<pattern id="' + fab + '" patternContentUnits="objectBoundingBox" width="1" height="1">' +
+        '<rect width="1" height="1" fill="#B9AE9E"/>' +
+        (shoe.image ? '<image href="' + attr(shoe.image) + '" x="-0.5" y="-0.35" width="2" height="1.7" preserveAspectRatio="xMidYMid slice"/>' : '') +
+      '</pattern>' +
+      '<linearGradient id="' + sh + '" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/>' +
+        '<stop offset="1" stop-color="#000" stop-opacity=".26"/></linearGradient>' +
+      '<radialGradient id="' + gl + '" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#000" stop-opacity=".22"/>' +
+        '<stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>' +
+      '</defs>' +
+      '<ellipse cx="117" cy="110" rx="96" ry="7" fill="url(#' + gl + ')"/>' +
+      '<g transform="translate(117 0) scale(' + sx + ' 1) translate(-117 0)">' +
+      '<path d="' + g.sole + '" fill="' + g.soleFill + '" stroke="#000" stroke-opacity=".22" stroke-width=".8"/>';
+    g.upper.forEach(function (d) {
+      out += '<path d="' + d + '" fill="url(#' + fab + ')"/><path d="' + d + '" fill="url(#' + sh + ')"/>' +
+        '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".3" stroke-width=".9" stroke-linejoin="round"/>';
+    });
+    out += '<path d="' + g.detail + '" fill="none" stroke="#000" stroke-opacity=".24" stroke-width="1" stroke-linecap="round" stroke-dasharray="' + (shoe.kind === 'sneaker' ? '0' : '0') + '"/>' +
+      '</g></svg>';
+    return out;
+  }
+  // Toe room = the size's foot length − the shopper's foot (cm) → words + a marker on tight / right / roomy.
+  function toeRoom(cm) {
+    var v = Math.round(cm * 10) / 10;
+    var pos = Math.max(4, Math.min(96, ((v + 1) / 3) * 100)); // −1 cm … +2 cm across the bar
+    if (v < 0) return { pos: pos, zone: 'tight', text: Math.abs(v) + ' cm shorter than your foot — tight' };
+    if (v <= 1) return { pos: pos, zone: 'right', text: v + ' cm toe room — just right' };
+    return { pos: pos, zone: 'roomy', text: v + ' cm toe room — roomy' };
+  }
+
   // A soft, filled mannequin. Wider with body-mass index and the chosen build, taller with height.
   // With dress = { kind, image, fit } it wears that garment.
   function figureSvg(heightCm, weightKg, build, size, dress) {
@@ -517,6 +623,7 @@
       image: root.getAttribute('data-product-image') || '',
     };
     if (product.image.indexOf('//') === 0) product.image = 'https:' + product.image;
+    product.shoe = shoeKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.garment = garmentKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     var accent = /^#[0-9A-Fa-f]{6}$/.test(settings.accentColor || '') ? settings.accentColor : '#111827';
     var genders = Array.isArray(settings.genders) ? settings.genders : [];
@@ -1346,7 +1453,40 @@
 
         var grid = el('div', 'ccf-sf-result');
         var av;
-        if (M) {
+        if (M && settings.storeType === 'shoes') {
+          // The product as a shoe, with a "Wearing 7" chip and a toe-room meter.
+          var shoeSizes = chartSizes();
+          var shoeAt = shoeSizes.indexOf(String(r.size));
+          av = el('div', 'ccf-sf-pvis is-shoe');
+          av.setAttribute('role', 'img');
+          av.setAttribute('aria-label', (product.title || 'This shoe') + ' in size ' + pick);
+          av.insertAdjacentHTML('beforeend', shoeSvg({
+            kind: product.shoe, image: product.image,
+            fit: shoeAt === -1 ? 0 : shoeSizes.indexOf(String(pick)) - shoeAt,
+          }));
+          var sw = el('span', 'ccf-sf-wearing');
+          sw.appendChild(el('span', 'ccf-sf-wdot'));
+          sw.appendChild(document.createTextNode('Wearing ' + pick));
+          av.appendChild(sw);
+          var pickRow = M.chart.filter(function (c) { return String(c.size) === String(pick); })[0];
+          if (pickRow && state.mode !== 'alt') {
+            var tr = toeRoom(pickRow.value - measuredValue());
+            var meter = el('div', 'ccf-sf-toe is-' + tr.zone);
+            var bar = el('div', 'ccf-sf-toebar');
+            bar.appendChild(el('span', 'ccf-sf-toezone is-tight'));
+            bar.appendChild(el('span', 'ccf-sf-toezone is-right'));
+            bar.appendChild(el('span', 'ccf-sf-toezone is-roomy'));
+            var mark = el('i', 'ccf-sf-toemark');
+            mark.style.left = tr.pos + '%';
+            bar.appendChild(mark);
+            meter.appendChild(bar);
+            meter.appendChild(el('p', 'ccf-sf-toetext', tr.text));
+            av.appendChild(meter);
+          }
+          var sme = el('div', 'ccf-sf-me');
+          sme.appendChild(el('span', null, shortMeasure()));
+          av.appendChild(sme);
+        } else if (M) {
           av = el('div', 'ccf-sf-pvis');
           if (product.image) {
             var pim = el('img');
@@ -1542,5 +1682,5 @@
   document.addEventListener('shopify:section:load', start);
 
   // Exposed for tests
-  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind };
+  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind, shoeKind: shoeKind, toeRoom: toeRoom };
 })();

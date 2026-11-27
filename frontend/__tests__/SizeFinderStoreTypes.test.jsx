@@ -162,3 +162,15 @@ describe('measure types', () => {
     expect(screen.getByTestId('preview-card')).toHaveTextContent('Measure your foot · takes 30 seconds');
   });
 });
+
+describe('shoes preview', () => {
+  it('the result shows the sample shoe with "Wearing" and a toe-room meter', async () => {
+    load({ storeType: 'shoes', enabled: true });
+    render(<SizeFinderScreen shop={SHOP} />);
+    const frame = await screen.findByTestId('preview-frame');
+    await within(frame).findByText(/Best match/);
+    expect(frame.querySelector('.sfp-pvis.is-shoe .sfp-shoe')).toHaveAttribute('data-kind', 'sneaker');
+    expect(frame.querySelector('.sfp-wearing')).toHaveTextContent('Wearing 7');
+    expect(frame.querySelector('.sfp-toe')).toHaveTextContent('0.4 cm toe room — just right');
+  });
+});
