@@ -198,9 +198,11 @@ app.use('/api/dashboard/:shopDomain/channels/whatsapp', require('./routes/whatsa
 app.use('/apps/cartncodform/reviews', require('./routes/reviewsProxy'));
 app.use('/apps/cartncodform/size-finder', require('./routes/sizeFinderProxy'));
 app.use('/apps/cartncodform/restock', require('./routes/restockProxy'));
+app.use('/apps/cartncodform/price-drop', require('./routes/priceDropProxy'));
 app.use('/apps/cartncodform', proxyRouter);
 app.use('/api/size-finder', require('./routes/sizeFinder'));
 app.use('/api/restock', require('./routes/restock'));
+app.use('/api/price-drop', require('./routes/priceDrop'));
 // Public unsubscribe endpoint — no requireAuth, has its own rate limiter.
 const unsubscribeRouter = require('./routes/unsubscribe');
 app.use('/api/unsubscribe', unsubscribeRouter);
@@ -1280,6 +1282,12 @@ async function runPollerTick() {
     await require('./services/restock').processRestock();
   } catch (err) {
     console.error('[restock] poller tick error:', err.message);
+  }
+  try {
+    // Price drop: check waited-for prices and send alerts (own 5-min gate per shop inside).
+    await require('./services/priceDrop').processPriceDrops();
+  } catch (err) {
+    console.error('[price-drop] poller tick error:', err.message);
   }
   try {
     await cleanupExpiredPrepaidCodes();

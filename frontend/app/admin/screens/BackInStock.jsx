@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import ThemeBlockSetup from '../components/ThemeBlockSetup';
-import BackInStockPreview, { RESTOCK_TEXT_DEFAULTS, RESTOCK_TEXT_MAX, EMAIL_DELAYS, whatsappPercent } from './BackInStockPreview';
+import BackInStockPreview, { RESTOCK_TEXT_DEFAULTS, RESTOCK_TEXT_MAX, PRICE_TEXT_DEFAULTS, PRICE_TEXT_MAX, EMAIL_DELAYS, whatsappPercent } from './BackInStockPreview';
 import { fitScale } from './SizeFinder';
 
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
@@ -18,17 +18,77 @@ export function formatMoney(n) {
   const v = Number(n) || 0;
   return `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
+export function shopMoney(n, code) {
+  const c = /^[A-Z]{3}$/.test(String(code || '')) ? code : 'INR';
+  const v = Number(n) || 0;
+  try {
+    return new Intl.NumberFormat(c === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: c, maximumFractionDigits: v % 1 ? 2 : 0 }).format(v);
+  } catch (e) {
+    return `${c} ${v}`;
+  }
+}
 export function waitingSince(date, now = Date.now()) {
   const days = Math.floor((now - new Date(date).getTime()) / (24 * 3600 * 1000));
   if (!(days >= 1)) return 'today';
   return days === 1 ? '1 day' : `${days} days`;
 }
 
+// What differs between the two "Notify me" features that share this screen.
+export const KINDS = {
+  restock: {
+    api: '/api/restock',
+    title: 'Back in stock',
+    name: 'back in stock',
+    intro: 'When a size is sold out, shoppers tap “Notify me”. When it’s back, WhatsApp shoppers hear first, then push, then email.',
+    showing: 'Showing on sold-out sizes',
+    waCardText: 'These sizes are back. Tap Send: WhatsApp opens with the message ready — just press send there.',
+    waIsBack: 'is back',
+    waitingTitle: 'Waiting list · restock these first',
+    emptyTip: 'No one is waiting yet. When shoppers tap “Notify me” on a sold-out size, it shows up here.',
+    offText: 'Turn it on to show a “Notify me” box on sold-out sizes and set the messages, with a live preview.',
+    boxText: 'On a sold-out size: a Notify me button; its arrow opens a small panel with a % ring and Email / WhatsApp choices.',
+    waSwitch: 'Shoppers leave their number. When the size is back we remind you at once, and you send it from this page in one tap.',
+    emailSwitch: 'Sent later, after WhatsApp and push get the first chance.',
+    lineLabel: 'Sold-out line',
+    lineHint: '{size} becomes the size, e.g. M',
+    messagesTitle: 'Message when it’s back',
+    messagesText: 'Sent once, as soon as the size can be bought again. {product} and {size} are filled in.',
+    tip: 'WhatsApp shoppers come first (you get a reminder at once), then push, then email after your wait. Automatic alerts go out in small groups (25 every 5 minutes); quiet hours and your plan’s monthly message limit apply.',
+    block: { handle: 'back-in-stock', name: 'Back in stock', whenLive: 'Shoppers see the box on sold-out sizes once Back in stock is turned on and saved.' },
+  },
+  price: {
+    api: '/api/price-drop',
+    title: 'Price drop',
+    name: 'price drop',
+    intro: 'Shoppers tap “Notify me if the price drops”. When you lower the price, WhatsApp shoppers hear first, then push and email.',
+    showing: 'Showing on in-stock products',
+    waCardText: 'These prices dropped. Tap Send: WhatsApp opens with the message ready — just press send there.',
+    waIsBack: 'is cheaper now',
+    waitingTitle: 'Waiting list · discount these to sell them',
+    emptyTip: 'No one is waiting yet. When shoppers tap “Notify me if the price drops”, it shows up here.',
+    offText: 'Turn it on to show a “Notify me if the price drops” button on products and set the messages, with a live preview.',
+    boxText: 'Under the buy buttons: a Notify me button; its arrow opens a small panel with the price, a % ring and Email / WhatsApp choices.',
+    waSwitch: 'Shoppers leave their number. When the price drops we remind you at once, and you send it from this page in one tap.',
+    emailSwitch: 'Sent as soon as the price drops.',
+    lineLabel: 'Price line',
+    lineHint: '{price} becomes the current price, e.g. ₹1,499',
+    messagesTitle: 'Message when the price drops',
+    messagesText: 'Sent once, when the price falls by your minimum drop. {product}, {size}, {price} and {oldPrice} are filled in.',
+    tip: 'Just change the price in Shopify as usual — we check prices every 5 minutes. WhatsApp shoppers come first (you get a reminder at once). Quiet hours and your plan’s monthly message limit apply.',
+    block: { handle: 'price-drop', name: 'Price drop', whenLive: 'Shoppers see the button on products once Price drop is turned on and saved.' },
+  },
+};
+export const DROP_STEPS = [1, 3, 5, 10, 15, 20, 25, 30, 40, 50];
+
 /**
- * "Back in stock": on/off, the "Notify me" box (words, colour, corners, push/email), the message
+ * "Back in stock" / "Price drop" (kind): on/off, the "Notify me" box (words, colour, corners, push/email), the message
  * texts, a live preview, the waiting list and last-30-day results.
  */
-export default function BackInStockScreen({ shop }) {
+export default function BackInStockScreen({ shop, kind = 'restock' }) {
+  const K = KINDS[kind] || KINDS.restock;
+  const isPrice = kind === 'price';
+  const TDEF = isPrice ? PRICE_TEXT_DEFAULTS : RESTOCK_TEXT_DEFAULTS;
+  const TMAX = isPrice ? PRICE_TEXT_MAX : RESTOCK_TEXT_MAX;
   const [settings, setSettings] = useState(null);
   const [overview, setOverview] = useState(null);
   const [loadError, setLoadError] = useState('');
@@ -72,13 +132,13 @@ export default function BackInStockScreen({ shop }) {
 
   useEffect(() => {
     if (!shop) return;
-    apiGet(`/api/restock/${shop}/config`)
+    apiGet(`${K.api}/${shop}/config`)
       .then((d) => setSettings(d.settings))
-      .catch((e) => setLoadError(e.message || 'Could not load the back in stock settings'));
-    apiGet(`/api/restock/${shop}/overview`)
+      .catch((e) => setLoadError(e.message || `Could not load the ${K.name} settings`));
+    apiGet(`${K.api}/${shop}/overview`)
       .then((d) => setOverview(d))
       .catch(() => setOverview({ failed: true }));
-    apiGet(`/api/restock/${shop}/whatsapp`)
+    apiGet(`${K.api}/${shop}/whatsapp`)
       .then((d) => setWaList(d.toSend || []))
       .catch(() => setWaList([]));
   }, [shop]);
@@ -105,7 +165,7 @@ export default function BackInStockScreen({ shop }) {
     setError('');
     setMessage('');
     try {
-      const d = await apiSend(`/api/restock/${shop}/config`, 'PUT', { settings });
+      const d = await apiSend(`${K.api}/${shop}/config`, 'PUT', { settings });
       setSettings(d.settings);
       setMessage('Saved');
     } catch (e) {
@@ -119,14 +179,14 @@ export default function BackInStockScreen({ shop }) {
     if (openSize === variantId) { setOpenSize(null); return; }
     setOpenSize(variantId);
     setPeople((p) => ({ ...p, [variantId]: { loading: true } }));
-    apiGet(`/api/restock/${shop}/waiting?variantId=${encodeURIComponent(variantId)}`)
+    apiGet(`${K.api}/${shop}/waiting?variantId=${encodeURIComponent(variantId)}`)
       .then((d) => setPeople((p) => ({ ...p, [variantId]: { list: d.people || [] } })))
       .catch(() => setPeople((p) => ({ ...p, [variantId]: { error: true } })));
   }
   // The link opens WhatsApp in a new tab (an <a>, so it is never blocked); then we mark it sent.
   function markWaSent(id) {
     setWaList((l) => (l || []).filter((x) => x.id !== id));
-    apiSend(`/api/restock/${shop}/whatsapp/${id}/sent`, 'POST', {}).catch(() => {});
+    apiSend(`${K.api}/${shop}/whatsapp/${id}/sent`, 'POST', {}).catch(() => {});
   }
   function openCustomer(profileId) {
     router.push(`/admin/customers/${encodeURIComponent(profileId)}?shop=${encodeURIComponent(shop)}`);
@@ -153,10 +213,10 @@ export default function BackInStockScreen({ shop }) {
       <label key={k} style={ui.field} data-hl={k} data-hl-label={label}>{label}
         <Tag
           type={opts.multiline ? undefined : 'text'}
-          maxLength={RESTOCK_TEXT_MAX[k]}
-          value={texts[k] ?? RESTOCK_TEXT_DEFAULTS[k]}
+          maxLength={TMAX[k]}
+          value={texts[k] ?? TDEF[k]}
           onChange={(e) => setText(k, e.target.value)}
-          placeholder={RESTOCK_TEXT_DEFAULTS[k]}
+          placeholder={TDEF[k]}
           style={opts.multiline ? { ...ui.input, height: 76, padding: '8px 10px', resize: 'vertical', maxWidth: 'none' } : ui.input}
           aria-label={label}
         />
@@ -197,11 +257,11 @@ export default function BackInStockScreen({ shop }) {
         <div className="bis-main">
           <div style={ui.head}>
             <div>
-              <h1 style={ui.h1}>Back in stock</h1>
-              <p style={{ ...ui.muted, margin: '0 0 10px' }}>When a size is sold out, shoppers tap “Notify me”. When it’s back, WhatsApp shoppers hear first, then push, then email.</p>
+              <h1 style={ui.h1}>{K.title}</h1>
+              <p style={{ ...ui.muted, margin: '0 0 10px' }}>{K.intro}</p>
               <span style={{ ...ui.pill, ...(enabled ? ui.pillOn : ui.pillOff) }}>
                 <span style={{ ...ui.dot, background: enabled ? '#047857' : '#B45309' }} />
-                {enabled ? 'Showing on sold-out sizes' : 'Hidden — turn on and save to show it'}
+                {enabled ? K.showing : 'Hidden — turn on and save to show it'}
               </span>
             </div>
             <span style={ui.switchWrap}>
@@ -210,7 +270,7 @@ export default function BackInStockScreen({ shop }) {
                 type="button"
                 role="switch"
                 aria-checked={enabled}
-                aria-label="Turn on Back in stock"
+                aria-label={`Turn on ${K.title}`}
                 onClick={() => set({ enabled: !enabled })}
                 style={{ ...ui.toggle, background: enabled ? '#4F46E5' : '#9CA3AF' }}
               >
@@ -221,7 +281,7 @@ export default function BackInStockScreen({ shop }) {
 
           {waList && waList.length > 0 && (
             <section style={{ ...ui.card, borderColor: '#86EFAC', background: '#F0FDF4' }} aria-label="Send on WhatsApp">
-              <SectionHead icon="chat" title={`Send on WhatsApp · ${waList.length} waiting`} text="These sizes are back. Tap Send: WhatsApp opens with the message ready — just press send there." />
+              <SectionHead icon="chat" title={`Send on WhatsApp · ${waList.length} waiting`} text={K.waCardText} />
               <ul style={ui.people} aria-label="WhatsApp alerts to send">
                 {waList.map((w) => (
                   <li key={w.id} style={ui.person}>
@@ -230,7 +290,7 @@ export default function BackInStockScreen({ shop }) {
                     </span>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={ui.personMain}>{w.phone}</span>
-                      <span style={ui.hint}>{w.productTitle}{w.variantTitle ? ` · ${w.variantTitle}` : ''} is back</span>
+                      <span style={ui.hint}>{w.productTitle}{w.variantTitle ? ` · ${w.variantTitle}` : ''} {K.waIsBack}</span>
                     </span>
                     <a href={w.waLink} target="_blank" rel="noopener noreferrer" style={ui.waBtn} onClick={() => markWaSent(w.id)}>
                       Send on WhatsApp
@@ -249,10 +309,10 @@ export default function BackInStockScreen({ shop }) {
               <Stat label="Clicked" value={ov ? ov.last30.clicked : '—'} />
               <Stat label="Sales" value={ov ? formatMoney(ov.last30.revenue) : '—'} sub={ov ? `${ov.last30.orders} order${ov.last30.orders === 1 ? '' : 's'}` : ''} />
             </div>
-            <p style={{ ...ui.group, marginTop: 16 }}>Waiting list · restock these first</p>
+            <p style={{ ...ui.group, marginTop: 16 }}>{K.waitingTitle}</p>
             {overview && overview.failed && <p style={ui.error}>Could not load the waiting list.</p>}
             {ov && ov.waiting.length === 0 && (
-              <p style={ui.tip}>No one is waiting yet. When shoppers tap “Notify me” on a sold-out size, it shows up here.</p>
+              <p style={ui.tip}>{K.emptyTip}</p>
             )}
             {ov && ov.waiting.length > 0 && (
               <table style={ui.table} aria-label="Waiting list">
@@ -260,6 +320,7 @@ export default function BackInStockScreen({ shop }) {
                   <tr>
                     <th style={ui.th}>Product</th>
                     <th style={ui.th}>Size</th>
+                    {isPrice && <th style={ui.th}>Price then</th>}
                     <th style={{ ...ui.th, textAlign: 'right' }}>Waiting</th>
                     <th style={ui.th}>By</th>
                     <th style={ui.th}>Since</th>
@@ -278,6 +339,7 @@ export default function BackInStockScreen({ shop }) {
                         </span>
                       </td>
                       <td style={ui.td}>{w.variantTitle || '—'}</td>
+                      {isPrice && <td style={{ ...ui.td, color: '#616161' }}>{w.basePrice != null ? shopMoney(w.basePrice, w.currencyCode) : 'checking…'}</td>}
                       <td style={{ ...ui.td, textAlign: 'right', fontWeight: 600 }}>{w.count}</td>
                       <td style={{ ...ui.td, color: '#616161' }}>{[w.whatsapp ? `${w.whatsapp} WhatsApp` : '', w.push ? `${w.push} push` : '', w.email ? `${w.email} email` : ''].filter(Boolean).join(' · ')}</td>
                       <td style={{ ...ui.td, color: '#616161' }}>{waitingSince(w.since)}</td>
@@ -295,7 +357,7 @@ export default function BackInStockScreen({ shop }) {
                     </tr>
                     {openSize === w.variantId && (
                       <tr>
-                        <td colSpan={6} style={{ ...ui.td, background: '#FAFAFA', padding: '6px 10px 10px' }}>
+                        <td colSpan={isPrice ? 7 : 6} style={{ ...ui.td, background: '#FAFAFA', padding: '6px 10px 10px' }}>
                           <WaitingPeople data={people[w.variantId]} onOpen={openCustomer} />
                         </td>
                       </tr>
@@ -307,17 +369,18 @@ export default function BackInStockScreen({ shop }) {
           </section>
 
           {!enabled ? (
-            <section style={ui.offCard} aria-label="Back in stock is off">
+            <section style={ui.offCard} aria-label={`${K.title} is off`}>
               <span style={ui.offIcon} aria-hidden="true">
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
               </span>
-              <p style={ui.offTitle}>Back in stock is off</p>
-              <p style={ui.offText}>Turn it on to show a “Notify me” box on sold-out sizes and set the messages, with a live preview.</p>
-              <button type="button" style={ui.save} onClick={() => set({ enabled: true })}>Turn on Back in stock</button>
+              <p style={ui.offTitle}>{K.title} is off</p>
+              <p style={ui.offText}>{K.offText}</p>
+              <button type="button" style={ui.save} onClick={() => set({ enabled: true })}>Turn on {K.title}</button>
             </section>
           ) : (<>
             <section style={ui.card} aria-label="Notify me box" {...focusArea('box')}>
-              <SectionHead icon="bell" title="“Notify me” button and panel" text="On a sold-out size: a Notify me button; its arrow opens a small panel with a % ring and Email / WhatsApp choices." />
+              <SectionHead icon="bell" title="“Notify me” button and panel" text={K.boxText} />
+              {!isPrice && (
               <div style={{ ...ui.toggleRow, marginBottom: 14 }} data-hl="triggerText" data-hl-label="Replace Buy it now">
                 <span>
                   <span style={ui.sectionTitle}>Replace “Buy it now”</span>
@@ -334,13 +397,27 @@ export default function BackInStockScreen({ shop }) {
                   <span style={{ ...ui.knob, transform: settings.replaceBuyNow !== false ? 'translateX(20px)' : 'translateX(0)' }} />
                 </button>
               </div>
+              )}
               <p style={ui.group}>How shoppers get the alert</p>
               <div style={ui.toggles}>
-                {channelSwitch('whatsapp', 'WhatsApp · fastest', 'Shoppers leave their number. When the size is back we remind you at once, and you send it from this page in one tap.')}
+                {channelSwitch('whatsapp', 'WhatsApp · fastest', K.waSwitch)}
                 {channelSwitch('push', 'Push notification', 'Sent at once. One tap, no typing. Needs the “ShopiReachBoost AI Push” app embed on.')}
-                {channelSwitch('email', 'Email', 'Sent later, after WhatsApp and push get the first chance.')}
+                {channelSwitch('email', 'Email', K.emailSwitch)}
               </div>
-              {channels.email && (
+              {isPrice && (
+                <label style={{ ...ui.field, marginTop: 12 }} data-hl="minDropPercent" data-hl-label="Minimum drop">Minimum price drop
+                  <span style={ui.hint}>Only alert when the price falls at least this much below what the shopper saw.</span>
+                  <select
+                    value={settings.minDropPercent ?? 5}
+                    onChange={(e) => set({ minDropPercent: Number(e.target.value) })}
+                    style={{ ...ui.input, maxWidth: 260 }}
+                    aria-label="Minimum price drop"
+                  >
+                    {DROP_STEPS.map((v) => <option key={v} value={v}>{v}% or more</option>)}
+                  </select>
+                </label>
+              )}
+              {!isPrice && channels.email && (
                 <label style={{ ...ui.field, marginTop: 12 }} data-hl="emailDelayMinutes" data-hl-label="Email wait">Send email alerts
                   <select
                     value={settings.emailDelayMinutes ?? 60}
@@ -391,7 +468,7 @@ export default function BackInStockScreen({ shop }) {
               <p style={{ ...ui.group, marginTop: 16 }}>Words</p>
               <div className="bis-grid2">
                 {textField('Button on the page', 'triggerText')}
-                {textField('Sold-out line', 'boxTitle', { hint: '{size} becomes the size, e.g. M' })}
+                {textField(K.lineLabel, 'boxTitle', { hint: K.lineHint })}
                 {textField('Chance label', 'chanceLabel')}
                 {textField('Small text', 'boxText')}
                 {textField('Panel button', 'buttonText')}
@@ -461,7 +538,7 @@ export default function BackInStockScreen({ shop }) {
             </section>
 
             <section style={ui.card} aria-label="Messages" {...focusArea('messages')}>
-              <SectionHead icon="send" title="Message when it’s back" text="Sent once, as soon as the size can be bought again. {product} and {size} are filled in." />
+              <SectionHead icon="send" title={K.messagesTitle} text={K.messagesText} />
               {channels.push && (<>
                 <p style={ui.group}>Push notification</p>
                 {textField('Push title', 'pushTitle')}
@@ -477,16 +554,16 @@ export default function BackInStockScreen({ shop }) {
                 {textField('Email text', 'emailBody', { multiline: true })}
               </>)}
               <p style={ui.tip}>
-                WhatsApp shoppers come first (you get a reminder at once), then push, then email after your wait. Automatic alerts go out in small groups (25 every 5 minutes); quiet hours and your plan’s monthly message limit apply.
+                {K.tip}
               </p>
             </section>
 
             <ThemeBlockSetup
               shop={shop}
-              handle="back-in-stock"
-              blockName="Back in stock"
+              handle={K.block.handle}
+              blockName={K.block.name}
               place="under the Add to cart button"
-              whenLive="Shoppers see the box on sold-out sizes once Back in stock is turned on and saved."
+              whenLive={K.block.whenLive}
             />
           </>)}
 
@@ -500,6 +577,7 @@ export default function BackInStockScreen({ shop }) {
           <aside className="bis-side" style={fit.height ? { height: Math.ceil(fit.height * fit.scale) } : undefined}>
             <div ref={fitRef} className="bis-fit" style={{ transform: `scale(${fit.scale})`, width: `${100 / fit.scale}%` }}>
               <BackInStockPreview
+                kind={kind}
                 settings={settings}
                 show={previewShow}
                 onShowBoth={() => setPreviewShow('both')}

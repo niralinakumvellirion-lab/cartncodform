@@ -24,6 +24,7 @@ const VARIANTS = [
 
 let posts;
 let timers = [];
+let listeners = [];
 
 async function load({ settings = SETTINGS, selected = '2', design = 'false', push = null, subscribeResult = { ok: true }, keepStorage = false } = {}) {
   timers.forEach((t) => clearInterval(t));
@@ -53,12 +54,18 @@ async function load({ settings = SETTINGS, selected = '2', design = 'false', pus
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve(null) });
   });
+  // Remove the page listeners an earlier test's copy of the script added (one copy per page in real life).
+  listeners.forEach(([type, fn, opt]) => document.removeEventListener(type, fn, opt));
+  listeners = [];
+  const realAdd = document.addEventListener;
+  document.addEventListener = function (type, fn, opt) { listeners.push([type, fn, opt]); return realAdd.call(this, type, fn, opt); };
   const realSetInterval = window.setInterval;
   window.setInterval = (fn, ms) => { const id = realSetInterval(fn, ms); timers.push(id); return id; };
   // eslint-disable-next-line no-new-func
   new Function(SCRIPT)();
+  await flush(); // the script adds its page listeners and its 600 ms check once its settings load
   window.setInterval = realSetInterval;
-  await flush();
+  document.addEventListener = realAdd;
 }
 
 const q = (sel) => document.querySelector(sel);

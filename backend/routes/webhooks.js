@@ -36,6 +36,8 @@ const ComplianceRequest = require('../models/ComplianceRequest');
 const SizeFinderConfig = require('../models/SizeFinderConfig');
 const RestockConfig = require('../models/RestockConfig');
 const RestockRequest = require('../models/RestockRequest');
+const PriceDropConfig = require('../models/PriceDropConfig');
+const PriceDropRequest = require('../models/PriceDropRequest');
 
 // All models that hold shopDomain-scoped data and must be wiped on shop/redact.
 // ALLOWLIST (intentionally excluded): SubscriptionEvent (billing analytics, no shopper PII),
@@ -58,6 +60,8 @@ const SHOP_REDACT_MODELS = [
   PurchaseRecord,
   Review,
   ReviewSettings,
+  PriceDropConfig,
+  PriceDropRequest,
   RestockConfig,
   RestockRequest,
   ReviewVote,
@@ -836,7 +840,10 @@ async function runCustomersRedact(cr) {
       const e164 = normalizePhone(customerPhone) || customerPhone;
       restockOr.push({ phone: { $in: [...new Set([customerPhone, e164])] } });
     }
-    if (restockOr.length) await RestockRequest.deleteMany({ shopDomain, $or: restockOr });
+    if (restockOr.length) {
+      await RestockRequest.deleteMany({ shopDomain, $or: restockOr });
+      await PriceDropRequest.deleteMany({ shopDomain, $or: restockOr });
+    }
 
     await ComplianceRequest.updateOne(
       { _id: cr._id },

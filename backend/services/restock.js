@@ -90,9 +90,18 @@ async function alreadyBought(request, deps) {
   return !!hit;
 }
 
-/** Send one claimed request. Returns 'sent' | 'failed' | 'skipped'. */
-async function sendOne(request, settings, deps, now) {
-  const finish = (status, error) => RestockRequest.updateOne(
+// What differs between Back in stock and Price drop when sending one alert.
+const RESTOCK_CTX = {
+  Request: RestockRequest,
+  buildMessage,
+  signalType: 'back_in_stock',
+  reason: (r) => `Asked to hear when ${sizeLabel(r.variantTitle)} is back`,
+};
+
+/** Send one claimed request (push or email). Returns 'sent' | 'failed' | 'skipped'. */
+async function sendOne(request, settings, deps, now, ctx = RESTOCK_CTX) {
+  const Request = ctx.Request;
+  const finish = (status, error) => Request.updateOne(
     { _id: request._id },
     { $set: { status, error: error || null, sentAt: status === 'sent' ? now : null, claimedAt: null } }
   );
@@ -112,8 +121,8 @@ async function sendOne(request, settings, deps, now) {
   const job = await ScheduledJob.create({
     shopDomain: request.shopDomain,
     profileId: request.profileId || null,
-    signalType: 'back_in_stock',
-    reason: `Asked to hear when ${sizeLabel(request.variantTitle)} is back`,
+    signalType: ctx.signalType,
+    reason: ctx.reason(request),
     channel: request.channel,
     status: 'pending',
     runAt: now,
@@ -122,7 +131,7 @@ async function sendOne(request, settings, deps, now) {
     sessionId: request.sessionId || undefined,
     productHandle: request.productHandle || null,
   });
-  const msg = buildMessage(settings, request, request.shopDomain, String(job._id));
+  const msg = ctx.buildMessage(settings, request, request.shopDomain, String(job._id));
 
   let ok = false;
   let error = null;
@@ -152,7 +161,7 @@ async function sendOne(request, settings, deps, now) {
     { _id: job._id },
     { $set: ok ? { status: 'sent', sentAt: now, payload } : { status: 'failed', error, payload } }
   );
-  await RestockRequest.updateOne(
+  await Request.updateOne(
     { _id: request._id },
     { $set: { status: ok ? 'sent' : 'failed', error: ok ? null : error, sentAt: ok ? now : null, jobId: job._id, claimedAt: null } }
   );
@@ -160,7 +169,7 @@ async function sendOne(request, settings, deps, now) {
     await Profile.updateOne({ _id: request.profileId }, {
       $push: {
         messages: {
-          $each: [{ channel: request.channel, type: 'back_in_stock', sentAt: now, outcome: 'sent', jobId: job._id }],
+          $each: [{ channel: request.channel, type: ctx.signalType, sentAt: now, outcome: 'sent', jobId: job._id }],
           $slice: -20,
         },
       },
@@ -329,4 +338,4 @@ async function processRestock(options = {}) {
   return results;
 }
 
-module.exports = { processRestock, processShop, availableVariants, CHECK_EVERY_MS, WAVE };
+module.exports = { processRestock, processShop, availableVariants, sendOne, defaultDeps, CHECK_EVERY_MS, WAVE };

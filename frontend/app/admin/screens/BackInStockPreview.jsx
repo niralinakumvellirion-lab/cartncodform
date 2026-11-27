@@ -42,17 +42,44 @@ export function delayLabel(minutes) {
   return m === 60 ? '1 hour' : `${m / 60} hours`;
 }
 export const SAMPLE = { product: 'Cotton Kurta', size: 'M', price: '₹1,299' };
+// Price drop: mirrors backend/utils/priceDrop.js TEXT_DEFAULTS / TEXT_MAX.
+export const PRICE_TEXT_DEFAULTS = {
+  triggerText: 'Notify me if the price drops',
+  boxTitle: 'Now {price}',
+  chanceLabel: 'Your chance to be notified',
+  boxText: 'We’ll tell you the moment it gets cheaper.',
+  buttonText: 'Notify me',
+  emailPlaceholder: 'Your email',
+  whatsappPlaceholder: 'WhatsApp number',
+  whatsappHint: 'Fastest · we message you the moment the price drops',
+  emailHint: 'We email you when the price drops',
+  partialText: 'Done! Add {next} too to reach 100%.',
+  successText: 'Done! We’ll tell you when the price drops.',
+  pushTitle: 'Price drop! {product} is now {price}',
+  pushBody: 'Was {oldPrice}, now {price}. Grab it before the sale ends.',
+  emailSubject: '{product} is now {price}',
+  emailBody: 'Good news! {product} dropped from {oldPrice} to {price}. Grab it before the sale ends.',
+  whatsappMessage: 'Hi! Good news — {product} is now {price} (was {oldPrice}). Get it here: {link}',
+};
+export const PRICE_TEXT_MAX = {
+  triggerText: 40, boxTitle: 60, chanceLabel: 50, boxText: 90, buttonText: 30, emailPlaceholder: 40,
+  whatsappPlaceholder: 40, whatsappHint: 80, emailHint: 80, partialText: 90, successText: 90,
+  pushTitle: 65, pushBody: 160, emailSubject: 90, emailBody: 400, whatsappMessage: 300,
+};
+export const PRICE_SAMPLE = { before: '₹1,499', after: '₹1,199' };
 
 /** Saved text (or the default when empty) with {product} / {size} filled from the sample. */
-export function restockText(texts, key, sample = SAMPLE, extra = {}) {
-  const raw = texts && texts[key] != null && String(texts[key]).trim() ? texts[key] : RESTOCK_TEXT_DEFAULTS[key];
+export function restockText(texts, key, sample = SAMPLE, extra = {}, defaults = RESTOCK_TEXT_DEFAULTS) {
+  const raw = texts && texts[key] != null && String(texts[key]).trim() ? texts[key] : defaults[key];
   return String(raw)
     .replace(/\{product\}/g, sample.product)
     .replace(/\{size\}/g, sample.size)
     .replace(/\{time\}/g, extra.time || '1 hour')
     .replace(/\{link\}/g, extra.link || 'your-store.com/products/cotton-kurta')
     .replace(/\{next\}/g, extra.next || 'email')
-    .replace(/\{percent\}/g, extra.percent != null ? String(extra.percent) : '80');
+    .replace(/\{percent\}/g, extra.percent != null ? String(extra.percent) : '80')
+    .replace(/\{price\}/g, extra.price || PRICE_SAMPLE.after)
+    .replace(/\{oldPrice\}/g, extra.oldPrice || PRICE_SAMPLE.before);
 }
 export function restockRadius(v) {
   const n = Number(v);
@@ -108,14 +135,18 @@ function Bell() {
  * email. `show` = 'box' | 'messages' | 'both' (follows the section being edited); `highlight.key`
  * outlines the part the field being edited changes.
  */
-export default function BackInStockPreview({ settings, show = 'both', onShowBoth, highlight = null, boxView: boxViewProp, onBoxViewChange }) {
+export default function BackInStockPreview({ kind = 'restock', settings, show = 'both', onShowBoth, highlight = null, boxView: boxViewProp, onBoxViewChange }) {
   const [ownView, setOwnView] = useState('form');
   const boxView = boxViewProp || ownView;
   const setBoxView = onBoxViewChange || setOwnView;
   const [device, setDevice] = useState('desktop');
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const radius = restockRadius(settings.buttonRadius);
-  const t = (k) => restockText(settings.texts, k, SAMPLE, { time: delayLabel(settings.emailDelayMinutes) });
+  const isPrice = kind === 'price';
+  const D = isPrice ? PRICE_TEXT_DEFAULTS : RESTOCK_TEXT_DEFAULTS;
+  // Box words: {price} is today's price. Messages (tm): {price} is the lower price, {oldPrice} the old one.
+  const t = (k) => restockText(settings.texts, k, SAMPLE, { time: delayLabel(settings.emailDelayMinutes), price: PRICE_SAMPLE.before }, D);
+  const tm = (k) => restockText(settings.texts, k, SAMPLE, { time: delayLabel(settings.emailDelayMinutes) }, D);
   const hl = (...keys) => (highlight && keys.includes(highlight.key) ? ' is-hl' : '');
   const ch = settings.channels || { push: true, email: true, whatsapp: false };
   const waPct = whatsappPercent(settings.whatsappPercent);
@@ -131,9 +162,9 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
   const isOpen = view !== 'closed';
   // In the "open" state show WhatsApp picked (its field visible) to show the round selectors at work.
   const picked = view === 'form' ? { whatsapp: ch.whatsapp, email: !ch.whatsapp && ch.email } : {};
-  const tx = (k) => restockText(settings.texts, k, SAMPLE, {
+  const tx = (k) => restockText(settings.texts, k, SAMPLE, { price: PRICE_SAMPLE.before,
     time: delayLabel(settings.emailDelayMinutes), next: got.whatsapp ? 'email' : 'WhatsApp', percent: pct,
-  });
+  }, D);
 
   const option = (kind, channel, name, icon, badge, placeholderKey, hintKey, prefix) => {
     const done = !!got[channel];
@@ -175,7 +206,7 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
           <div className="bp-top">
             <span className="bp-thumb" />
             <span className="bp-topcopy">
-              <span className={`bp-sold${hl('boxTitle')}`}>{t('boxTitle')}</span>
+              <span className={`bp-sold${isPrice ? ' is-price' : ''}${hl('boxTitle')}`}>{t('boxTitle')}</span>
               <span className={`bp-chance${hl('chanceLabel')}`}>{t('chanceLabel')}</span>
             </span>
             <span data-testid="preview-meter"><Ring pct={pct} /></span>
@@ -235,13 +266,18 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
             <div className="bp-page bp-static" data-testid="preview-box" {...{ inert: '' }}>
               <div className="bp-prod">
                 <span className="bp-thumb" />
-                <span><b>{SAMPLE.product}</b><small>{SAMPLE.price}</small></span>
+                <span><b>{SAMPLE.product}</b><small>{isPrice ? PRICE_SAMPLE.before : SAMPLE.price}</small></span>
               </div>
-              <div className="bp-sizes" aria-hidden="true">
-                {['S', 'M', 'L', 'XL'].map((s) => <span key={s} className={s === SAMPLE.size ? 'on' : s === 'XL' ? 'out' : ''}>{s}</span>)}
+              <div className={`bp-sizes${isPrice ? ' is-price' : ''}`} aria-hidden="true">
+                {['S', 'M', 'L', 'XL'].map((s) => <span key={s} className={s === SAMPLE.size ? 'on' : s === 'XL' && !isPrice ? 'out' : ''}>{s}</span>)}
               </div>
-              <span className="bp-soldout">Sold out</span>
-              {settings.replaceBuyNow === false && <span className="bp-buynow">Buy it now</span>}
+              {isPrice ? <>
+                <span className="bp-addcart">Add to cart</span>
+                <span className="bp-buynow">Buy it now</span>
+              </> : <>
+                <span className="bp-soldout">Sold out</span>
+                {settings.replaceBuyNow === false && <span className="bp-buynow">Buy it now</span>}
+              </>}
               {box}
             </div>
           </div>
@@ -249,7 +285,7 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
 
         {show !== 'box' && (
           <div className="bp-block">
-            <p className="bp-blocktitle"><span>2</span>Message when it’s back</p>
+            <p className="bp-blocktitle"><span>2</span>{isPrice ? 'Message when the price drops' : 'Message when it’s back'}</p>
             <div className="bp-static" data-testid="preview-messages" {...{ inert: '' }}>
               {ch.push && (
                 <div className="bp-push">
@@ -258,8 +294,8 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
                     <span className="bp-app">🛍</span>
                     <span className="bp-ncopy">
                       <span className="bp-nmeta">your-store.com · now</span>
-                      <span className={`bp-ntitle${hl('pushTitle')}`}>{t('pushTitle')}</span>
-                      <span className={`bp-nbody${hl('pushBody')}`}>{t('pushBody')}</span>
+                      <span className={`bp-ntitle${hl('pushTitle')}`}>{tm('pushTitle')}</span>
+                      <span className={`bp-nbody${hl('pushBody')}`}>{tm('pushBody')}</span>
                     </span>
                     <span className="bp-nimg" />
                   </div>
@@ -269,7 +305,7 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
                 <div className="bp-wa">
                   <p className="bp-sub">WhatsApp · you send it</p>
                   <div className="bp-chat">
-                    <span className={`bp-bubble${hl('whatsappMessage')}`}>{t('whatsappMessage')}<small>now ✓✓</small></span>
+                    <span className={`bp-bubble${hl('whatsappMessage')}`}>{tm('whatsappMessage')}<small>now ✓✓</small></span>
                   </div>
                 </div>
               )}
@@ -277,10 +313,10 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
                 <div className="bp-mail">
                   <p className="bp-sub">Email</p>
                   <div className="bp-envelope">
-                    <p className={`bp-subject${hl('emailSubject')}`}>{t('emailSubject')}</p>
+                    <p className={`bp-subject${hl('emailSubject')}`}>{tm('emailSubject')}</p>
                     <div className="bp-mailbody">
                       <span className="bp-mailimg" />
-                      <p className={`bp-mailtext${hl('emailBody')}`}>{t('emailBody')}</p>
+                      <p className={`bp-mailtext${hl('emailBody')}`}>{tm('emailBody')}</p>
                       <span className={`bp-mailbtn${hl('accentColor')}`}>Shop now</span>
                       <p className="bp-unsub">Unsubscribe</p>
                     </div>
@@ -291,7 +327,9 @@ export default function BackInStockPreview({ settings, show = 'both', onShowBoth
           </div>
         )}
       </div>
-      <p className="bp-sample">Sample: {SAMPLE.product}, size {SAMPLE.size} sold out.</p>
+      <p className="bp-sample">{isPrice
+        ? `Sample: ${SAMPLE.product}, size ${SAMPLE.size}, ${PRICE_SAMPLE.before} → ${PRICE_SAMPLE.after}.`
+        : `Sample: ${SAMPLE.product}, size ${SAMPLE.size} sold out.`}</p>
     </section>
   );
 }
@@ -327,6 +365,8 @@ const CSS = `
 .bp-sizes span{min-width:34px;text-align:center;padding:6px 8px;border:1px solid #D4D4D4;border-radius:6px;font-size:12px}
 .bp-sizes span.on{border-color:#1A1A1A;box-shadow:inset 0 0 0 1px #1A1A1A;text-decoration:line-through;color:#8A8A8A}
 .bp-sizes span.out{text-decoration:line-through;color:#B0B0B0}
+.bp-sizes.is-price span.on{text-decoration:none;color:#1A1A1A}
+.bp-addcart{display:block;text-align:center;padding:9px;border:1px solid #1A1A1A;border-radius:8px;font-size:13px;font-weight:600;color:#1A1A1A}
 .bp-soldout{display:block;text-align:center;padding:9px;border:1px solid #E3E3E3;border-radius:8px;font-size:13px;color:#8A8A8A;background:#FAFAFA}
 .bp-box{margin-top:8px}
 .bp-buynow{display:block;text-align:center;margin-top:8px;padding:9px;border-radius:8px;background:#1A1A1A;color:#fff;font-size:13px;font-weight:600}
@@ -341,6 +381,7 @@ const CSS = `
 .bp-top{display:flex;align-items:center;gap:10px}
 .bp-topcopy{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .bp-sold{font-size:11.5px;font-weight:600;color:#B42318}
+.bp-sold.is-price{color:#15803D;font-weight:650}
 .bp-chance{font-size:13.5px;font-weight:650;line-height:1.3}
 .bp-ring{position:relative;width:50px;height:50px;display:inline-block;flex-shrink:0}
 .bp-ringpct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:750;color:#15803D}

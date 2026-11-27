@@ -30,6 +30,7 @@ function ActivityContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/size-finder" rel="size-finder">Find my size</a>
         <a href="/admin/back-in-stock" rel="back-in-stock">Back in stock</a>
+        <a href="/admin/price-drop" rel="price-drop">Price drop</a>
         <a href="/admin/reviews" rel="reviews">Reviews</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
         <a href="/admin/plans" rel="plans">Plans</a>
