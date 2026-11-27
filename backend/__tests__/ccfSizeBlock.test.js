@@ -290,7 +290,21 @@ describe('ccf-size.js — "Try it on me" steps', () => {
     expect(btn('M — Not available')).toBeTruthy();
     expect(q('.ccf-sf-size.is-out')).not.toBeNull();
     expect(q('.ccf-sf-note').textContent).toMatch(/S is the closest size/);
+    expect(q('.ccf-sf-note').classList.contains('is-warn')).toBe(true);
+    expect(q('.ccf-sf-big b').textContent).toBe('S');
+    expect(q('.ccf-sf-pill').textContent).toBe('Closest available');
+    expect(q('.ccf-sf-fit').textContent).toBe('One size down from M — expect a closer fit.');
     expect(btn('Select size S')).toBeTruthy();
+  });
+
+  test('result card: big size, Best match, fit line, my details on the avatar', async () => {
+    await load();
+    await toResult('Woman');
+    expect(q('.ccf-sf-big b').textContent).toBe('M');
+    expect(q('.ccf-sf-pill').textContent).toBe('Best match');
+    expect(q('.ccf-sf-fit').textContent).toBe('Chest just right · Waist a little roomy');
+    expect(q('.ccf-sf-me').textContent).toMatch(/cm · .*kg/);
+    expect(q('.ccf-sf-fine').textContent).toMatch(/A guide, not a guarantee/);
   });
 
   test('no size the product sells → only Close', async () => {

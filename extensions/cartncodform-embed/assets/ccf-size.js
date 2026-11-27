@@ -19,6 +19,9 @@
   var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>';
   var CHEV = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
   var BACK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
+  var INFO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>';
+  var RULER = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15 15 3l6 6L9 21z"/><path d="m7 11 2 2M10 8l2 2M13 5l2 2"/></svg>';
+  var PEN = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>';
   var LOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
   var SHIRT = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z"/></svg>';
   var MALE = SVG + '<circle cx="10" cy="14" r="5"/><path d="M14 10l6-6M15 4h5v5"/></svg>';
@@ -143,27 +146,47 @@
       '.ccf-sf-status{font-size:12.5px;color:#6B7280}',
       // result
       '.ccf-sf-change{display:inline-flex;align-items:center;gap:4px;background:none;border:none;padding:4px 0;color:#111;font-size:13px;font-weight:600;cursor:pointer}',
-      '.ccf-sf-result{display:grid;grid-template-columns:42% 1fr;gap:14px;margin-top:8px}',
-      '.ccf-sf-avatar{position:relative;border-radius:16px;background:linear-gradient(180deg,#F5F5F4,#ECECEA);display:flex;align-items:flex-end;justify-content:center;min-height:250px;padding:12px 0 0;overflow:hidden;color:#A3A3A3}',
+      '.ccf-sf-result{display:grid;grid-template-columns:40% 1fr;gap:16px;margin-top:10px;align-items:start}',
+      '.ccf-sf-avatar{position:relative;border-radius:18px;background:radial-gradient(120% 70% at 50% 18%,#FFFFFF 0,#F4F3F0 55%,#E9E7E2 100%);display:flex;align-items:flex-end;justify-content:center;min-height:262px;padding:14px 0 26px;overflow:hidden;color:#A3A3A3;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}',
+      '.ccf-sf-avatar svg{position:relative;z-index:1}',
+      '.ccf-sf-floor{position:absolute;left:50%;bottom:20px;width:62%;height:14px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.16) 0,rgba(0,0,0,0) 70%)}',
       // The product "worn" by the mannequin: no frame; multiply blends the photo's white background away.
-      '.ccf-sf-avatar .ccf-sf-wear{position:absolute;left:50%;top:19%;height:62%;width:auto;max-width:78%;transform:translateX(-50%);object-fit:contain;mix-blend-mode:multiply;pointer-events:none;border:0;border-radius:0;box-shadow:none;background:transparent}',
-      '.ccf-sf-prod{display:flex;gap:10px;align-items:center;padding-bottom:10px;border-bottom:1px solid #F0F0F0}',
-      '.ccf-sf-thumb{width:44px;height:44px;border-radius:10px;object-fit:cover;background:#F3F4F6;flex-shrink:0;display:block}',
+      '.ccf-sf-avatar .ccf-sf-wear{position:absolute;z-index:2;left:50%;top:17%;height:60%;width:auto;max-width:76%;transform:translateX(-50%);object-fit:contain;mix-blend-mode:multiply;pointer-events:none;border:0;border-radius:0;box-shadow:none;background:transparent}',
+      '.ccf-sf-me{position:absolute;z-index:3;left:8px;right:8px;bottom:8px;display:flex;justify-content:center}',
+      '.ccf-sf-me span{padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.92);box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:10.5px;font-weight:600;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.ccf-sf-prod{display:flex;gap:10px;align-items:center;padding-bottom:12px;border-bottom:1px solid #F0F0F0}',
+      '.ccf-sf-thumb{width:44px;height:44px;border-radius:10px;object-fit:cover;background:#F3F4F6;flex-shrink:0;display:block;border:1px solid #F0F0F0}',
       '.ccf-sf-pname{margin:0;font-size:13px;font-weight:650;line-height:1.3}',
-      '.ccf-sf-pprice{margin:1px 0 0;font-size:12px;color:#6B7280}',
-      '.ccf-sf-rtitle{display:flex;align-items:center;gap:4px;margin:10px 0 8px;font-size:13px;font-weight:650}',
-      '.ccf-sf-sizes{display:flex;flex-direction:column;gap:7px}',
-      '.ccf-sf-size{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:10px 12px;border:1.5px solid #E5E7EB;border-radius:12px;background:#fff;cursor:pointer;color:#111;text-align:left}',
-      '.ccf-sf-size b{font-size:14px}',
-      '.ccf-sf-size small{font-size:11.5px;color:#6B7280}',
-      '.ccf-sf-size.is-rec{border-color:#22C55E;background:#F0FDF4}',
+      '.ccf-sf-pprice{margin:2px 0 0;font-size:12px;color:#6B7280}',
+      '.ccf-sf-hero{margin:12px 0 0;padding:12px 14px;border-radius:14px;background:#FAFAF9;border:1px solid #EFEEEC}',
+      '.ccf-sf-rtitle{margin:0;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6B7280}',
+      '.ccf-sf-big{display:flex;align-items:center;gap:10px;margin:4px 0 2px}',
+      '.ccf-sf-big b{font-size:34px;line-height:1;font-weight:750;letter-spacing:-.02em;color:#111}',
+      '.ccf-sf-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:650;background:#DCFCE7;color:#166534}',
+      '.ccf-sf-pill svg{width:12px;height:12px}',
+      '.ccf-sf-pill.is-alt{background:#FEF3C7;color:#92400E}',
+      '.ccf-sf-fit{margin:4px 0 0;font-size:12px;color:#4B5563;line-height:1.4}',
+      '.ccf-sf-other{margin:12px 0 6px;font-size:11.5px;font-weight:600;color:#6B7280}',
+      '.ccf-sf-sizes{display:flex;gap:6px}',
+      '.ccf-sf-size{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;border:1.5px solid #E5E7EB;border-radius:12px;background:#fff;cursor:pointer;color:#111;text-align:center;transition:border-color .15s,background .15s}',
+      '.ccf-sf-size:hover{border-color:#9CA3AF}',
+      '.ccf-sf-size b{font-size:14px;font-weight:700}',
+      '.ccf-sf-size small{font-size:10.5px;color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}',
       '.ccf-sf-size.is-rec small{color:#15803D;font-weight:650}',
-      '.ccf-sf-size[aria-pressed="true"]{box-shadow:0 0 0 1.5px #111;border-color:#111}',
-      '.ccf-sf-size.is-rec[aria-pressed="true"]{box-shadow:0 0 0 1.5px #16A34A;border-color:#16A34A}',
-      '.ccf-sf-size.is-out{opacity:.55}',
-      '.ccf-sf-note{margin:10px 0 0;font-size:12px;color:#6B7280;line-height:1.45}',
-      '.ccf-sf-links{display:flex;justify-content:center;gap:20px;margin:12px 0 0}',
-      '.ccf-sf-link{background:none;border:0;padding:0;color:#111;text-decoration:underline;text-underline-offset:3px;font-size:12.5px;font-weight:600;cursor:pointer}',
+      '.ccf-sf-size[aria-pressed="true"]{border-color:#111;background:#111;color:#fff}',
+      '.ccf-sf-size[aria-pressed="true"] small{color:rgba(255,255,255,.8)}',
+      '.ccf-sf-size.is-out{cursor:not-allowed;background:#F9FAFB;border-style:dashed;color:#9CA3AF}',
+      '.ccf-sf-size.is-out:hover{border-color:#E5E7EB}',
+      '.ccf-sf-size.is-out b{text-decoration:line-through;font-weight:600}',
+      '.ccf-sf-size.is-out small{color:#9CA3AF}',
+      '.ccf-sf-note{display:flex;gap:8px;align-items:flex-start;margin:12px 0 0;padding:10px 12px;border-radius:12px;background:#F3F4F6;font-size:12px;color:#374151;line-height:1.45}',
+      '.ccf-sf-note svg{flex-shrink:0;margin-top:1px}',
+      '.ccf-sf-note.is-warn{background:#FFFBEB;color:#78350F}',
+      '.ccf-sf-note.is-ok{background:#F0FDF4;color:#14532D}',
+      '.ccf-sf-links{display:flex;justify-content:center;gap:8px;margin:14px 0 0}',
+      '.ccf-sf-link{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid #E5E7EB;border-radius:999px;padding:6px 12px;color:#111;font-size:12px;font-weight:600;cursor:pointer}',
+      '.ccf-sf-link:hover{border-color:#9CA3AF}',
+      '.ccf-sf-fine{margin:10px 0 0;text-align:center;font-size:11px;color:#9CA3AF;line-height:1.4}',
       '.ccf-sf-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}',
       '.ccf-sf-table th{font-size:11px;font-weight:600;color:#6B7280}',
       '.ccf-sf-table th,.ccf-sf-table td{border-bottom:1px solid #F0F0F0;padding:7px 6px;text-align:center}',
@@ -179,7 +202,7 @@
       '.ccf-sf-ghost{display:block;margin:10px auto 0;background:none;border:none;color:#374151;font-size:13px;font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer}',
       '.ccf-sf-privacy{display:flex;align-items:center;justify-content:center;gap:6px;margin:12px 0 0;font-size:11.5px;color:#9CA3AF}',
       '.ccf-sf-err{font-size:13px;color:#B42318;font-weight:500;margin:0 0 12px;background:#FEF2F2;border-radius:10px;padding:9px 12px}',
-      '@media (max-width:640px){.ccf-sf-panel{left:0;right:0;top:auto;bottom:0;width:100%;max-height:92vh;border-radius:22px 22px 0 0;transform:translateY(100%);opacity:1}.ccf-sf-panel.is-open{transform:translateY(0)}.ccf-sf-panel .ccf-sf-grab{display:block;width:38px;height:4px;border-radius:4px;background:#D1D5DB;margin:8px auto 0}.ccf-sf-body{padding:4px 18px 8px}.ccf-sf-foot{padding:10px 18px 16px}.ccf-sf-avatar{min-height:220px}}',
+      '@media (max-width:640px){.ccf-sf-panel{left:0;right:0;top:auto;bottom:0;width:100%;max-height:92vh;border-radius:22px 22px 0 0;transform:translateY(100%);opacity:1}.ccf-sf-panel.is-open{transform:translateY(0)}.ccf-sf-panel .ccf-sf-grab{display:block;width:38px;height:4px;border-radius:4px;background:#D1D5DB;margin:8px auto 0}.ccf-sf-body{padding:4px 18px 8px}.ccf-sf-foot{padding:10px 18px 16px}.ccf-sf-avatar{min-height:230px}.ccf-sf-big b{font-size:30px}}',
       '@media (prefers-reduced-motion:reduce){.ccf-sf-panel,.ccf-sf-overlay,.ccf-sf-stage svg,.ccf-sf-bar span{transition:none!important;animation:none!important}}',
     ].join('');
     document.head.appendChild(s);
@@ -465,6 +488,21 @@
         box.appendChild(b);
       });
       return box;
+    }
+
+    // One short line on how the suggested size fits.
+    var FIT_AREA = { chest: 'chest', waist: 'waist', hip: 'hips', hips: 'hips', shoulder: 'shoulders' };
+    var FIT_WORD = { right: 'just right', roomy: 'a little roomy', tight: 'a little snug' };
+    function fitText(r, pick, chart, at) {
+      if (String(pick) !== String(r.size)) {
+        var d = chart.indexOf(String(pick)) - at;
+        if (at === -1 || chart.indexOf(String(pick)) === -1 || !d) return '';
+        var steps = Math.abs(d) === 1 ? 'One size' : Math.abs(d) + ' sizes';
+        return d > 0 ? steps + ' up from ' + r.size + ' — expect a roomier fit.' : steps + ' down from ' + r.size + ' — expect a closer fit.';
+      }
+      var parts = (r.reasons || []).filter(function (x) { return FIT_AREA[x.area] && FIT_WORD[x.status]; })
+        .map(function (x) { return FIT_AREA[x.area].charAt(0).toUpperCase() + FIT_AREA[x.area].slice(1) + ' ' + FIT_WORD[x.status]; });
+      return parts.length ? parts.slice(0, 2).join(' · ') : 'Fits your measurements best.';
     }
 
     function heightText() {
@@ -842,7 +880,7 @@
 
         var grid = el('div', 'ccf-sf-result');
         var av = el('div', 'ccf-sf-avatar');
-        av.innerHTML = figureSvg(state.heightCm, state.weightKg, state.shape, 230);
+        av.innerHTML = '<span class="ccf-sf-floor"></span>' + figureSvg(state.heightCm, state.weightKg, state.shape, 230);
         if (product.image) {
           var wear = el('img', 'ccf-sf-wear');
           wear.src = product.image;
@@ -850,6 +888,9 @@
           wear.loading = 'lazy';
           av.appendChild(wear);
         }
+        var me = el('div', 'ccf-sf-me');
+        me.appendChild(el('span', null, heightText() + ' · ' + weightText()));
+        av.appendChild(me);
         grid.appendChild(av);
 
         var info = el('div');
@@ -870,14 +911,31 @@
           p.appendChild(pt);
           info.appendChild(p);
         }
-        var rt = el('p', 'ccf-sf-rtitle', T('resultTitle'));
-        info.appendChild(rt);
 
-        // The recommended size with its neighbours: fits close · recommended · roomy.
+        // The size we suggest, big, with a "Best match" / "Closest available" pill and one line on the fit.
         var chart = ((settings.charts && settings.charts[state.gender]) || []).map(function (c) { return String(c.size); });
         var at = chart.indexOf(String(r.size));
+        var isBest = String(pick) === String(r.size);
+        var hero = el('div', 'ccf-sf-hero');
+        hero.appendChild(el('p', 'ccf-sf-rtitle', T('resultTitle')));
+        var big = el('div', 'ccf-sf-big');
+        big.appendChild(el('b', null, String(pick)));
+        if (sells(pick)) {
+          var pill = el('span', 'ccf-sf-pill' + (isBest ? '' : ' is-alt'));
+          pill.innerHTML = isBest ? CHECK : '';
+          pill.appendChild(document.createTextNode(isBest ? 'Best match' : 'Closest available'));
+          big.appendChild(pill);
+        }
+        hero.appendChild(big);
+        var fitLine = fitText(r, pick, chart, at);
+        if (fitLine) hero.appendChild(el('p', 'ccf-sf-fit', fitLine));
+        info.appendChild(hero);
+
+        // The recommended size with its neighbours: fits close · recommended · roomy.
         var shown = at === -1 ? [String(r.size)] : chart.slice(Math.max(0, at - 1), at + 2);
         if (shown.indexOf(String(pick)) === -1 && chart.indexOf(String(pick)) !== -1) shown.push(String(pick));
+        shown.sort(function (x, y) { return chart.indexOf(x) - chart.indexOf(y); });
+        info.appendChild(el('p', 'ccf-sf-other', 'Compare sizes'));
         var list = el('div', 'ccf-sf-sizes');
         list.setAttribute('role', 'group');
         list.setAttribute('aria-label', 'Sizes');
@@ -892,6 +950,7 @@
             draw();
           }, s + ' — ' + note);
           row.setAttribute('aria-pressed', s === pick ? 'true' : 'false');
+          if (!sells(s)) row.setAttribute('aria-disabled', 'true');
           row.appendChild(el('b', null, s));
           row.appendChild(el('small', null, note));
           list.appendChild(row);
@@ -900,19 +959,33 @@
         grid.appendChild(info);
         body.appendChild(grid);
 
-        if (r.outOfRange) body.appendChild(el('p', 'ccf-sf-note', r.size + ' is the largest size in the chart — it may feel tight.'));
+        var addNote = function (text, kind) {
+          var n = el('p', 'ccf-sf-note' + (kind ? ' is-' + kind : ''));
+          n.innerHTML = kind === 'ok' ? CHECK.replace(/18/g, '15') : INFO;
+          n.appendChild(el('span', null, text));
+          body.appendChild(n);
+        };
         if (!sells(r.size)) {
-          body.appendChild(el('p', 'ccf-sf-note', sells(pick)
+          addNote(sells(pick)
             ? 'This product doesn’t come in ' + r.size + ' — ' + pick + ' is the closest size it has.'
-            : 'This product doesn’t come in ' + r.size + '. Check the size chart for the closest size.'));
+            : 'This product doesn’t come in ' + r.size + '. Check the size chart for the closest size.', 'warn');
         }
-        if (r.saved) body.appendChild(el('p', 'ccf-sf-note', 'Saved — we’ll remember ' + r.size + ' for next time.'));
-        body.appendChild(el('p', 'ccf-sf-note', 'Based on your height, weight and build, compared with this product’s size chart. A guide, not a guarantee.'));
+        if (r.outOfRange) addNote(r.size + ' is the largest size in the chart — it may feel tight.', 'warn');
+        if (r.saved) addNote('Saved — we’ll remember ' + r.size + ' for next time.', 'ok');
         var links = el('div', 'ccf-sf-links');
-        if (opts.sizeChart) links.appendChild(button('ccf-sf-link', state.showChart ? 'Hide size chart' : 'View size chart', function () { state.showChart = !state.showChart; draw(); }));
-        links.appendChild(button('ccf-sf-link', 'Edit details', function () { state.result = null; go(2); estimateSoon(0); }));
+        if (opts.sizeChart) {
+          var sc = button('ccf-sf-link', null, function () { state.showChart = !state.showChart; draw(); }, state.showChart ? 'Hide size chart' : 'View size chart');
+          sc.innerHTML = RULER;
+          sc.appendChild(document.createTextNode(state.showChart ? 'Hide size chart' : 'View size chart'));
+          links.appendChild(sc);
+        }
+        var ed = button('ccf-sf-link', null, function () { state.result = null; go(2); estimateSoon(0); }, 'Edit details');
+        ed.innerHTML = PEN;
+        ed.appendChild(document.createTextNode('Edit details'));
+        links.appendChild(ed);
         body.appendChild(links);
         if (opts.sizeChart && state.showChart) body.appendChild(chartTable(state.gender, r.size));
+        body.appendChild(el('p', 'ccf-sf-fine', 'Based on your height, weight and build, compared with this product’s size chart. A guide, not a guarantee.'));
 
         if (err) foot.appendChild(err);
         var canAdd = opts.addToBag && addButton() && sells(pick);

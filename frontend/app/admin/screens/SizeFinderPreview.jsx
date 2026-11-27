@@ -293,10 +293,14 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {!error && result && (
               <>
                 <div className="sfp-result">
-                  <div className="sfp-avatar"><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={150} /><span className="sfp-wear" /></div>
+                  <div className="sfp-avatar"><span className="sfp-floor" /><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={150} /><span className="sfp-wear" /><span className="sfp-me">{heightLabel(sample.heightCm, 'cm')} · {weightLabel(sample.weightKg, 'kg')}</span></div>
                   <div>
                     <div className="sfp-prod"><span className="sfp-thumb" /><span><b>Cotton Kurta</b><small>₹1,299</small></span></div>
-                    <p className={`sfp-rtitle${hl('resultTitle')}`}>{t('resultTitle')}</p>
+                    <div className="sfp-hero">
+                      <p className={`sfp-rtitle${hl('resultTitle')}`}>{t('resultTitle')}</p>
+                      <div className="sfp-big"><b>{result.size}</b><span className="sfp-pill">✓ Best match</span></div>
+                    </div>
+                    <p className="sfp-other">Compare sizes</p>
                     <div className={`sfp-sizes${hl('chart')}`}>
                       {rows.map((r) => (
                         <div key={r.size} className={`sfp-size${r.rec ? ' is-rec' : ''}`}>
@@ -306,8 +310,9 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
                     </div>
                   </div>
                 </div>
-                {result.outOfRange && <p className="sfp-note">{result.size} is the largest size in the chart — it may feel tight.</p>}
+                {result.outOfRange && <p className="sfp-note is-warn">{result.size} is the largest size in the chart — it may feel tight.</p>}
                 <div className="sfp-links">{opt.sizeChart && <span className={hl('sizeChart').trim()}>View size chart</span>}<span>Edit details</span></div>
+                <p className="sfp-fine">A guide based on your details and this product’s size chart.</p>
               </>
             )}
           </>
@@ -481,22 +486,31 @@ const CSS = `
 .sfp-status{font-size:11px;color:#6B7280}
 .sfp-change{font-size:11.5px;font-weight:600;margin:2px 0 6px !important}
 .sfp-result{display:grid;grid-template-columns:40% 1fr;gap:10px}
-.sfp-avatar{position:relative;border-radius:12px;background:linear-gradient(180deg,#F5F5F4,#ECECEA);display:flex;align-items:flex-end;justify-content:center;min-height:170px;padding-top:8px;overflow:hidden}
-.sfp-wear{position:absolute;left:50%;top:21%;width:46%;height:44%;transform:translateX(-50%);border-radius:30% 30% 12% 12% / 18% 18% 8% 8%;background:linear-gradient(160deg,#C9B79C,#9C8466);mix-blend-mode:multiply;opacity:.9}
-.sfp-prod{display:flex;gap:7px;align-items:center;padding-bottom:7px;border-bottom:1px solid #F0F0F0}
+.sfp-avatar{position:relative;border-radius:14px;background:radial-gradient(120% 70% at 50% 18%,#FFFFFF 0,#F4F3F0 55%,#E9E7E2 100%);display:flex;align-items:flex-end;justify-content:center;min-height:180px;padding:8px 0 20px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
+.sfp-floor{position:absolute;left:50%;bottom:15px;width:62%;height:10px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.16) 0,rgba(0,0,0,0) 70%)}
+.sfp-wear{position:absolute;left:50%;top:19%;width:44%;height:42%;transform:translateX(-50%);border-radius:30% 30% 12% 12% / 18% 18% 8% 8%;background:linear-gradient(160deg,#C9B79C,#9C8466);mix-blend-mode:multiply;opacity:.9}
+.sfp-me{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.92);box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:9px;font-weight:600;color:#374151;white-space:nowrap}
+.sfp-prod{display:flex;gap:7px;align-items:center;padding-bottom:8px;border-bottom:1px solid #F0F0F0}
 .sfp-thumb{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,#E9E4DA,#D8D0C2);flex-shrink:0}
 .sfp-prod b{display:block;font-size:11.5px}
 .sfp-prod small{font-size:10.5px;color:#6B7280}
-.sfp-rtitle{font-size:11.5px;font-weight:650;margin:8px 0 6px !important}
-.sfp-sizes{display:flex;flex-direction:column;gap:5px}
-.sfp-size{display:flex;align-items:center;justify-content:space-between;padding:7px 9px;border:1.5px solid #E5E7EB;border-radius:9px}
+.sfp-hero{margin-top:8px;padding:8px 10px;border-radius:11px;background:#FAFAF9;border:1px solid #EFEEEC}
+.sfp-rtitle{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6B7280;margin:0 !important}
+.sfp-big{display:flex;align-items:center;gap:7px;margin-top:2px}
+.sfp-big b{font-size:24px;line-height:1.1;font-weight:750}
+.sfp-pill{padding:2px 6px;border-radius:999px;font-size:9px;font-weight:650;background:#DCFCE7;color:#166534}
+.sfp-other{font-size:9.5px;font-weight:600;color:#6B7280;margin:8px 0 4px !important}
+.sfp-sizes{display:flex;gap:4px}
+.sfp-size{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 2px;border:1.5px solid #E5E7EB;border-radius:9px}
 .sfp-size b{font-size:12px}
-.sfp-size small{font-size:9.5px;color:#6B7280}
-.sfp-size.is-rec{border-color:#22C55E;background:#F0FDF4;box-shadow:0 0 0 1px #16A34A}
-.sfp-size.is-rec small{color:#15803D;font-weight:650}
-.sfp-note{font-size:10.5px;color:#6B7280;margin:8px 0 0 !important}
-.sfp-links{display:flex;justify-content:center;gap:16px;margin:10px 0 2px}
-.sfp-links span{font-size:10.5px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.sfp-size small{font-size:8.5px;color:#6B7280;white-space:nowrap}
+.sfp-size.is-rec{border-color:#111;background:#111;color:#fff}
+.sfp-size.is-rec small{color:rgba(255,255,255,.8);font-weight:650}
+.sfp-note{font-size:10.5px;color:#374151;margin:8px 0 0 !important;padding:7px 9px;border-radius:9px;background:#F3F4F6}
+.sfp-note.is-warn{background:#FFFBEB;color:#78350F}
+.sfp-links{display:flex;justify-content:center;gap:6px;margin:10px 0 2px}
+.sfp-links span{font-size:10px;font-weight:600;padding:4px 9px;border:1px solid #E5E7EB;border-radius:999px}
+.sfp-fine{text-align:center;font-size:9px;color:#9CA3AF;margin:6px 0 0 !important}
 .sfp-loading{padding:18px 0;text-align:center}
 .sfp-err{font-size:12px;color:#B42318;font-weight:500;background:#FEF2F2;border-radius:6px;padding:8px 10px;text-align:left}
 .sfp-foot{padding:8px 18px 12px}
