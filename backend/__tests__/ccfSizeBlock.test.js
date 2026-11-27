@@ -284,12 +284,26 @@ describe('ccf-size.js — "Try it on me" steps', () => {
     expect(q('.ccf-sf-err').textContent).toBe('Size S is sold out right now.');
   });
 
-  test('a size the product does not sell is marked and cannot be picked', async () => {
+  test('a size the product does not sell is marked; the nearest sold size is picked instead', async () => {
     await load({ sizeValues: 'S' });
     await toResult('Woman');
     expect(btn('M — Not available')).toBeTruthy();
     expect(q('.ccf-sf-size.is-out')).not.toBeNull();
+    expect(q('.ccf-sf-note').textContent).toMatch(/S is the closest size/);
+    expect(btn('Select size S')).toBeTruthy();
+  });
+
+  test('no size the product sells → only Close', async () => {
+    await load({ sizeValues: 'XXS' });
+    await toResult('Woman');
     expect(btn('Close')).toBeTruthy();
+  });
+
+  test('the product photo is worn on the mannequin (blended, no frame)', async () => {
+    await load({ pageHtml: ADD_PAGE() });
+    await toResult('Woman');
+    expect(q('img.ccf-sf-wear')).not.toBeNull();
+    expect(q('img.ccf-sf-wear').src).toBe('https://cdn.shopify.com/k.jpg');
   });
 
   test('server error → back on the build step with the message', async () => {

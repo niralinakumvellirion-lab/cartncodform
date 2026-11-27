@@ -482,7 +482,7 @@ const CSS = `
 .sfp-change{font-size:11.5px;font-weight:600;margin:2px 0 6px !important}
 .sfp-result{display:grid;grid-template-columns:40% 1fr;gap:10px}
 .sfp-avatar{position:relative;border-radius:12px;background:linear-gradient(180deg,#F5F5F4,#ECECEA);display:flex;align-items:flex-end;justify-content:center;min-height:170px;padding-top:8px;overflow:hidden}
-.sfp-wear{position:absolute;left:50%;top:26%;width:52%;height:34%;transform:translateX(-50%);border-radius:8px;background:linear-gradient(135deg,#E9E4DA,#CFC6B8);box-shadow:0 4px 12px rgba(0,0,0,.16)}
+.sfp-wear{position:absolute;left:50%;top:21%;width:46%;height:44%;transform:translateX(-50%);border-radius:30% 30% 12% 12% / 18% 18% 8% 8%;background:linear-gradient(160deg,#C9B79C,#9C8466);mix-blend-mode:multiply;opacity:.9}
 .sfp-prod{display:flex;gap:7px;align-items:center;padding-bottom:7px;border-bottom:1px solid #F0F0F0}
 .sfp-thumb{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,#E9E4DA,#D8D0C2);flex-shrink:0}
 .sfp-prod b{display:block;font-size:11.5px}

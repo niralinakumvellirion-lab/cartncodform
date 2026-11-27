@@ -145,7 +145,8 @@
       '.ccf-sf-change{display:inline-flex;align-items:center;gap:4px;background:none;border:none;padding:4px 0;color:#111;font-size:13px;font-weight:600;cursor:pointer}',
       '.ccf-sf-result{display:grid;grid-template-columns:42% 1fr;gap:14px;margin-top:8px}',
       '.ccf-sf-avatar{position:relative;border-radius:16px;background:linear-gradient(180deg,#F5F5F4,#ECECEA);display:flex;align-items:flex-end;justify-content:center;min-height:250px;padding:12px 0 0;overflow:hidden;color:#A3A3A3}',
-      '.ccf-sf-avatar img{position:absolute;left:50%;top:28%;width:58%;transform:translateX(-50%);border-radius:10px;box-shadow:0 6px 16px rgba(0,0,0,.18);background:#fff}',
+      // The product "worn" by the mannequin: no frame; multiply blends the photo's white background away.
+      '.ccf-sf-avatar .ccf-sf-wear{position:absolute;left:50%;top:19%;height:62%;width:auto;max-width:78%;transform:translateX(-50%);object-fit:contain;mix-blend-mode:multiply;pointer-events:none;border:0;border-radius:0;box-shadow:none;background:transparent}',
       '.ccf-sf-prod{display:flex;gap:10px;align-items:center;padding-bottom:10px;border-bottom:1px solid #F0F0F0}',
       '.ccf-sf-thumb{width:44px;height:44px;border-radius:10px;object-fit:cover;background:#F3F4F6;flex-shrink:0;display:block}',
       '.ccf-sf-pname{margin:0;font-size:13px;font-weight:650;line-height:1.3}',
@@ -616,7 +617,7 @@
               state.step = 3;
             } else {
               state.result = res.d;
-              state.pick = res.d.size;
+              state.pick = closestSold(res.d.size);
               state.step = 5;
             }
             draw();
@@ -630,6 +631,20 @@
             draw();
           });
         });
+    }
+
+    // The recommended size, or — when this product isn't sold in it — the nearest size it is sold in
+    // (bigger first, then smaller), so the shopper can still pick and add a size.
+    function closestSold(size) {
+      if (sells(size)) return String(size);
+      var chart = ((settings.charts && settings.charts[state.gender]) || []).map(function (c) { return String(c.size); });
+      var at = chart.indexOf(String(size));
+      if (at === -1) return String(size);
+      for (var d = 1; d < chart.length; d++) {
+        if (at + d < chart.length && sells(chart[at + d])) return chart[at + d];
+        if (at - d >= 0 && sells(chart[at - d])) return chart[at - d];
+      }
+      return String(size);
     }
 
     // The theme's add-to-cart button for this product, if there is one we can press.
@@ -829,7 +844,7 @@
         var av = el('div', 'ccf-sf-avatar');
         av.innerHTML = figureSvg(state.heightCm, state.weightKg, state.shape, 230);
         if (product.image) {
-          var wear = el('img');
+          var wear = el('img', 'ccf-sf-wear');
           wear.src = product.image;
           wear.alt = '';
           wear.loading = 'lazy';
@@ -862,6 +877,7 @@
         var chart = ((settings.charts && settings.charts[state.gender]) || []).map(function (c) { return String(c.size); });
         var at = chart.indexOf(String(r.size));
         var shown = at === -1 ? [String(r.size)] : chart.slice(Math.max(0, at - 1), at + 2);
+        if (shown.indexOf(String(pick)) === -1 && chart.indexOf(String(pick)) !== -1) shown.push(String(pick));
         var list = el('div', 'ccf-sf-sizes');
         list.setAttribute('role', 'group');
         list.setAttribute('aria-label', 'Sizes');
@@ -885,7 +901,11 @@
         body.appendChild(grid);
 
         if (r.outOfRange) body.appendChild(el('p', 'ccf-sf-note', r.size + ' is the largest size in the chart — it may feel tight.'));
-        if (!sells(r.size)) body.appendChild(el('p', 'ccf-sf-note', 'This product doesn’t come in ' + r.size + '. Check the size chart for the closest size.'));
+        if (!sells(r.size)) {
+          body.appendChild(el('p', 'ccf-sf-note', sells(pick)
+            ? 'This product doesn’t come in ' + r.size + ' — ' + pick + ' is the closest size it has.'
+            : 'This product doesn’t come in ' + r.size + '. Check the size chart for the closest size.'));
+        }
         if (r.saved) body.appendChild(el('p', 'ccf-sf-note', 'Saved — we’ll remember ' + r.size + ' for next time.'));
         body.appendChild(el('p', 'ccf-sf-note', 'Based on your height, weight and build, compared with this product’s size chart. A guide, not a guarantee.'));
         var links = el('div', 'ccf-sf-links');
