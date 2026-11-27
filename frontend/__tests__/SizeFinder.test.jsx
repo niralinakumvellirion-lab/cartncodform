@@ -471,3 +471,14 @@ describe('pinned preview', () => {
     expect(container.querySelector('.sf-fit')).not.toBeNull();
   });
 });
+
+describe('dressed avatar in the preview', () => {
+  it('the result avatar wears the sample kurta, with a "Wearing" chip for the size', async () => {
+    const { container } = render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByLabelText('Recommended size');
+    const frame = screen.getByTestId('preview-frame');
+    expect(frame.querySelector('.sfp-avatar .sfp-garment')).toHaveAttribute('data-kind', 'kurta');
+    expect(frame.querySelector('.sfp-wearing')).toHaveTextContent('Wearing M');
+    expect(container.querySelector('.sfp-wear')).toBeNull();
+  });
+});

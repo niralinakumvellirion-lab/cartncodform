@@ -88,7 +88,38 @@ const SAMPLE_PRODUCT = { baby: 'Cotton Baby Romper', shoes: 'Canvas Sneakers', r
 const HANGER = <><path d="M12 6a2 2 0 1 1 2 2c-1 .4-2 1-2 2.2V11" /><path d="M12 11 3.5 17a1.5 1.5 0 0 0 .9 2.7h15.2a1.5 1.5 0 0 0 .9-2.7L12 11z" /></>;
 const CHECK = <path d="M5 12l5 5L20 7" />;
 
-function Mannequin({ heightCm, weightKg, build = 'average', h = 120 }) {
+// The sample product ("Cotton Kurta") worn on the result avatar — same kurta shape as ccf-size.js, with a
+// sample block-print fabric (on the store the fabric is the product's own photo).
+const KURTA = {
+  body: 'M25 27.5Q32 32.5 39 27.5L46.5 29.5Q50.6 31 51.7 39L52.9 62L48.3 62.6L46.3 47L45.4 74L47.3 100L49.2 121Q32 123.2 14.8 121L16.7 100L18.6 74L17.7 47L15.7 62.6L11.1 62L12.3 39Q13.4 31 17.5 29.5Z',
+  detail: 'M25 27.5Q32 32.5 39 27.5M32 30.6V42M48.3 62.6L52.9 62M15.7 62.6L11.1 62M15.2 117.8Q32 120 48.8 117.8M47.4 104.5L48.5 121M16.6 104.5L15.5 121M26 76L24 118M38 76L40 118',
+};
+function Garment({ id }) {
+  return (
+    <>
+      <defs>
+        <pattern id={`${id}f`} width="5" height="5" patternUnits="userSpaceOnUse">
+          <rect width="5" height="5" fill="#D9C9AE" />
+          <circle cx="2.5" cy="2.5" r=".9" fill="#B6563F" fillOpacity=".55" />
+          <circle cx="0" cy="0" r=".5" fill="#2F5D62" fillOpacity=".45" /><circle cx="5" cy="5" r=".5" fill="#2F5D62" fillOpacity=".45" />
+        </pattern>
+        <linearGradient id={`${id}s`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#000" stopOpacity=".26" /><stop offset=".22" stopColor="#fff" stopOpacity=".08" />
+          <stop offset=".5" stopColor="#000" stopOpacity="0" /><stop offset=".78" stopColor="#000" stopOpacity=".06" />
+          <stop offset="1" stopColor="#000" stopOpacity=".28" />
+        </linearGradient>
+      </defs>
+      <g className="sfp-garment" data-kind="kurta">
+        <path d={KURTA.body} fill={`url(#${id}f)`} />
+        <path d={KURTA.body} fill={`url(#${id}s)`} />
+        <path d={KURTA.body} fill="none" stroke="#000" strokeOpacity=".28" strokeWidth=".45" strokeLinejoin="round" />
+        <path d={KURTA.detail} fill="none" stroke="#000" strokeOpacity=".2" strokeWidth=".5" strokeLinecap="round" />
+      </g>
+    </>
+  );
+}
+
+function Mannequin({ heightCm, weightKg, build = 'average', h = 120, dressed = false }) {
   const s = figureScale(heightCm, weightKg, build);
   return (
     <svg width={Math.round(h * 0.42)} height={h} viewBox="0 0 64 160" aria-hidden="true"
@@ -103,6 +134,7 @@ function Mannequin({ heightCm, weightKg, build = 'average', h = 120 }) {
         <path d="M28 23h8v5h-8z" />
         <path d="M18 30c4-3 9-3.5 14-3.5s10 .5 14 3.5c3 2 4 5 4.5 9l2.5 34c.2 3-1.5 5-3.5 5s-3.3-1.6-3.6-4L46 46l-1 30c0 6 .5 10 .5 14l-2 63c-.1 3-2 4.5-4.3 4.5s-4-1.6-4-4.4L33.5 94h-3L29 153c0 2.8-1.8 4.4-4 4.4s-4.2-1.5-4.3-4.5l-2-63c0-4 .5-8 .5-14l-1-30-2.4 28c-.3 2.4-1.6 4-3.6 4s-3.7-2-3.5-5l2.5-34c.5-4 1.5-7 4.5-9z" />
       </g>
+      {dressed && <Garment id={`sfpw${h}`} />}
     </svg>
   );
 }
@@ -468,7 +500,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {!error && result && (
               <>
                 <div className="sfp-result">
-                  <div className="sfp-avatar"><span className="sfp-floor" /><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={150} /><span className="sfp-wear" /><span className="sfp-me">{heightLabel(sample.heightCm, 'cm')} · {weightLabel(sample.weightKg, 'kg')}</span></div>
+                  <div className="sfp-avatar"><span className="sfp-floor" /><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={150} dressed /><span className="sfp-wearing"><i />Wearing {result.size}</span><span className="sfp-me">{heightLabel(sample.heightCm, 'cm')} · {weightLabel(sample.weightKg, 'kg')}</span></div>
                   <div>
                     <div className="sfp-prod"><span className="sfp-thumb" /><span><b>Cotton Kurta</b><small>₹1,299</small></span></div>
                     <div className="sfp-hero">
@@ -667,7 +699,9 @@ const CSS = `
 .sfp-result{display:grid;grid-template-columns:40% 1fr;gap:10px}
 .sfp-avatar{position:relative;border-radius:14px;background:radial-gradient(120% 70% at 50% 18%,#FFFFFF 0,#F4F3F0 55%,#E9E7E2 100%);display:flex;align-items:flex-end;justify-content:center;min-height:180px;padding:8px 0 20px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
 .sfp-floor{position:absolute;left:50%;bottom:15px;width:62%;height:10px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.16) 0,rgba(0,0,0,0) 70%)}
-.sfp-wear{position:absolute;left:50%;top:19%;width:44%;height:42%;transform:translateX(-50%);border-radius:30% 30% 12% 12% / 18% 18% 8% 8%;background:linear-gradient(160deg,#C9B79C,#9C8466);mix-blend-mode:multiply;opacity:.9}
+.sfp-wearing{position:absolute;top:7px;left:7px;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;background:rgba(17,17,17,.86);color:#fff;font-size:8.5px;font-weight:650}
+.sfp-wearing i{width:5px;height:5px;border-radius:50%;background:#4ADE80}
+.sfp-avatar svg{filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}
 .sfp-me{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.92);box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:9px;font-weight:600;color:#374151;white-space:nowrap}
 .sfp-prod{display:flex;gap:7px;align-items:center;padding-bottom:8px;border-bottom:1px solid #F0F0F0}
 .sfp-thumb{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,#E9E4DA,#D8D0C2);flex-shrink:0}

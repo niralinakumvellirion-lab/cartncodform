@@ -193,7 +193,9 @@
       '.ccf-sf-avatar svg{position:relative;z-index:1}',
       '.ccf-sf-floor{position:absolute;left:50%;bottom:20px;width:62%;height:14px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.16) 0,rgba(0,0,0,0) 70%)}',
       // The product "worn" by the mannequin: no frame; multiply blends the photo's white background away.
-      '.ccf-sf-avatar .ccf-sf-wear{position:absolute;z-index:2;left:50%;top:17%;height:60%;width:auto;max-width:76%;transform:translateX(-50%);object-fit:contain;mix-blend-mode:multiply;pointer-events:none;border:0;border-radius:0;box-shadow:none;background:transparent}',
+      '.ccf-sf-avatar svg{filter:drop-shadow(0 6px 10px rgba(0,0,0,.08))}',
+      '.ccf-sf-wearing{position:absolute;z-index:3;top:10px;left:10px;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:rgba(17,17,17,.86);color:#fff;font-size:11px;font-weight:650;letter-spacing:.01em}',
+      '.ccf-sf-wdot{width:6px;height:6px;border-radius:50%;background:#4ADE80}',
       '.ccf-sf-me{position:absolute;z-index:3;left:8px;right:8px;bottom:8px;display:flex;justify-content:center}',
       '.ccf-sf-me span{padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.92);box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:10.5px;font-weight:600;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '.ccf-sf-prod{display:flex;gap:10px;align-items:center;padding-bottom:12px;border-bottom:1px solid #F0F0F0}',
@@ -384,8 +386,110 @@
   // Minimum time the "Creating your avatar" step shows (tests set window.__ccfSizeCreatingMs).
   var CREATING_MS = typeof window.__ccfSizeCreatingMs === 'number' ? window.__ccfSizeCreatingMs : 1700;
 
+  // ── Clothes on the avatar (clothing stores) ──
+  // The garment is drawn in the mannequin's own SVG (viewBox 64×160), so it follows height, weight and
+  // build. Its fabric is the product photo itself (a centre crop, so prints and colours show through),
+  // with shading and seams on top. No AI and no extra requests: the photo is already on the page.
+  var GARMENTS = {
+    tshirt: {
+      body: 'M25 27.5Q32 31.5 39 27.5L46.5 29.5Q50.6 31 51.7 39L52.5 47.2L46.7 48.6L46.2 46.5L45.4 76L46 93Q32 95.2 18 93L18.6 76L17.8 46.5L17.3 48.6L11.5 47.2L12.3 39Q13.4 31 17.5 29.5Z',
+      detail: 'M25 27.5Q32 31.5 39 27.5M25.8 28.6Q32 32.4 38.2 28.6M46.7 48.6L52.5 47.2M17.3 48.6L11.5 47.2M18 91.4Q32 93.6 46 91.4M24 33Q26 60 24.5 90M40 33Q38 60 39.5 90',
+    },
+    shirt: {
+      body: 'M25 27.5L32 32.5L39 27.5L46.5 29.5Q50.6 31 51.7 39L53.7 74.5L49.2 75L46.4 47.5L45.4 76L46 94Q32 96 18 94L18.6 76L17.6 47.5L14.8 75L10.3 74.5L12.3 39Q13.4 31 17.5 29.5Z',
+      detail: 'M25 27.5L28.4 33.4L32 32.5L35.6 33.4L39 27.5M32 32.5V94M49.4 71.3L53.5 70.8M14.6 71.3L10.5 70.8M18 92.4Q32 94.4 46 92.4',
+      dots: [[32, 40], [32, 50], [32, 60], [32, 70], [32, 80]],
+    },
+    kurta: {
+      body: 'M25 27.5Q32 32.5 39 27.5L46.5 29.5Q50.6 31 51.7 39L52.9 62L48.3 62.6L46.3 47L45.4 74L47.3 100L49.2 121Q32 123.2 14.8 121L16.7 100L18.6 74L17.7 47L15.7 62.6L11.1 62L12.3 39Q13.4 31 17.5 29.5Z',
+      detail: 'M25 27.5Q32 32.5 39 27.5M32 30.6V42M48.3 62.6L52.9 62M15.7 62.6L11.1 62M15.2 117.8Q32 120 48.8 117.8M47.4 104.5L48.5 121M16.6 104.5L15.5 121M26 76L24 118M38 76L40 118',
+    },
+    dress: {
+      body: 'M24.5 28.5Q32 34 39.5 28.5L44.8 29.6L46.2 46L45.4 70Q51.5 97 54.5 124Q32 128 9.5 124Q12.5 97 18.6 70L17.8 46L19.2 29.6Z',
+      detail: 'M24.5 28.5Q32 34 39.5 28.5M18.6 70Q32 72.4 45.4 70M27 74L22 124M32 74V126.5M37 74L42 124M10.6 121.4Q32 125.4 53.4 121.4',
+    },
+    hoodie: {
+      body: 'M25 27.5Q32 31 39 27.5L46.5 29.5Q50.6 31 51.7 39L53.8 74.5L49.1 75L46.4 47.5L45.6 78L46.4 96Q32 98 17.6 96L18.4 78L17.6 47.5L14.9 75L10.2 74.5L12.3 39Q13.4 31 17.5 29.5Z',
+      extra: ['M21.8 29.8Q32 38 42.2 29.8Q40.6 25.2 32 25.6Q23.4 25.2 21.8 29.8Z'],
+      detail: 'M23.5 80H40.5L42.5 90H21.5ZM30 33.5V42M34 33.5V42M49.2 71.5L53.6 71M14.8 71.5L10.4 71M17.8 92.6Q32 94.6 46.2 92.6',
+    },
+    pants: {
+      body: 'M18.8 74H45.2L45.9 90L43.8 152L37.2 152.4L33.4 96H30.6L26.8 152.4L20.2 152L18.1 90Z',
+      detail: 'M18.8 77.6H45.2M32 77.6V90M20.2 80.5Q23.4 82.4 23 87M43.8 80.5Q40.6 82.4 41 87M20.4 149H26.7M37.3 149H43.6M25 96L23.6 148M39 96L40.4 148',
+    },
+    shorts: {
+      body: 'M18.8 74H45.2L46 90L45.8 108L35.4 108.6L33.4 96H30.6L28.6 108.6L18.2 108L18 90Z',
+      detail: 'M18.8 77.6H45.2M32 77.6V90M20.2 80.5Q23.4 82.4 23 87M43.8 80.5Q40.6 82.4 41 87M18.3 105.6H28.8M35.2 105.6H45.7',
+    },
+    skirt: {
+      body: 'M18.8 72H45.2Q50 96 52.5 117Q32 121 11.5 117Q14 96 18.8 72Z',
+      detail: 'M18.8 75.4H45.2M25 76L20 118M32 76V120M39 76L44 118M12.4 114.6Q32 118.4 51.6 114.6',
+    },
+    saree: {
+      body: 'M24.5 28.5Q32 34 39.5 28.5L44.8 29.6L46.2 46L45.4 70Q51.5 97 54.5 124Q32 128 9.5 124Q12.5 97 18.6 70L17.8 46L19.2 29.6Z',
+      extra: ['M38.6 28.4L45.2 29.8L34.2 79L26.6 76.4Z'],
+      detail: 'M45.2 29.8L34.2 79M38.6 28.4L26.6 76.4M10.6 120.6Q32 124.6 53.4 120.6M10 123Q32 127 54 123M27 80L23 124M33 80V126',
+    },
+  };
+  // Words in the product title / type / tags → garment. First match wins (t-shirt before shirt).
+  var GARMENT_WORDS = [
+    ['saree', ['saree', 'sari', 'sarees']],
+    ['dress', ['dress', 'dresses', 'gown', 'frock', 'maxi', 'anarkali', 'jumpsuit', 'lehenga', 'playsuit']],
+    ['kurta', ['kurta', 'kurti', 'kurtas', 'kurtis', 'tunic', 'kaftan', 'sherwani', 'pathani']],
+    ['hoodie', ['hoodie', 'hoodies', 'sweatshirt', 'jacket', 'jackets', 'sweater', 'blazer', 'coat', 'cardigan', 'pullover', 'windcheater']],
+    ['tshirt', ['t shirt', 'tshirt', 'tshirts', 'tee', 'tees', 'polo', 'top', 'tops', 'tank', 'crop', 'camisole', 'vest', 'jersey']],
+    ['shirt', ['shirt', 'shirts', 'blouse', 'blouses', 'overshirt']],
+    ['pants', ['jeans', 'jean', 'trouser', 'trousers', 'pant', 'pants', 'joggers', 'pyjama', 'pajama', 'leggings', 'palazzo', 'chinos', 'trackpants', 'cargo']],
+    ['shorts', ['shorts', 'bermuda', 'boxers']],
+    ['skirt', ['skirt', 'skirts', 'ghagra']],
+  ];
+  function garmentKind(title, type, tags) {
+    var t = ' ' + [title, type, tags].join(' ').toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
+    for (var i = 0; i < GARMENT_WORDS.length; i++) {
+      for (var j = 0; j < GARMENT_WORDS[i][1].length; j++) {
+        if (t.indexOf(' ' + GARMENT_WORDS[i][1][j] + ' ') !== -1) return GARMENT_WORDS[i][0];
+      }
+    }
+    return 'tshirt';
+  }
+  function attr(v) { return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  // dress = { kind, image, fit } — fit: −2…2 steps from the recommended size (looser / closer drape).
+  function garmentSvg(dress) {
+    var g = GARMENTS[dress.kind] || GARMENTS.tshirt;
+    var n = Math.floor(Math.random() * 1e6);
+    var fab = 'ccfsffab' + n, shade = 'ccfsfsh' + n, light = 'ccfsflt' + n;
+    var f = Math.max(-2, Math.min(2, dress.fit || 0));
+    var fx = (1 + 0.045 * f).toFixed(3), fy = (1 + 0.015 * f).toFixed(3);
+    var out = '<defs>' +
+      '<pattern id="' + fab + '" patternContentUnits="objectBoundingBox" width="1" height="1">' +
+        '<rect width="1" height="1" fill="#CDBFAA"/>' +
+        (dress.image ? '<image href="' + attr(dress.image) + '" x="-0.5" y="-0.25" width="2" height="1.5" preserveAspectRatio="xMidYMid slice"/>' : '') +
+      '</pattern>' +
+      '<linearGradient id="' + shade + '" x1="0" y1="0" x2="1" y2="0">' +
+        '<stop offset="0" stop-color="#000" stop-opacity=".26"/><stop offset=".22" stop-color="#fff" stop-opacity=".08"/>' +
+        '<stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset=".78" stop-color="#000" stop-opacity=".06"/>' +
+        '<stop offset="1" stop-color="#000" stop-opacity=".28"/></linearGradient>' +
+      '<linearGradient id="' + light + '" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/>' +
+        '<stop offset="1" stop-color="#000" stop-opacity=".12"/></linearGradient>' +
+      '</defs>' +
+      '<g class="ccf-sf-garment" data-kind="' + dress.kind + '" transform="translate(32 64) scale(' + fx + ' ' + fy + ') translate(-32 -64)">';
+    var shapes = [g.body].concat(g.extra || []);
+    shapes.forEach(function (d) {
+      out += '<path d="' + d + '" fill="url(#' + fab + ')"/>' +
+        '<path d="' + d + '" fill="url(#' + shade + ')"/><path d="' + d + '" fill="url(#' + light + ')"/>' +
+        '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".28" stroke-width=".45" stroke-linejoin="round"/>';
+    });
+    out += '<path d="' + g.detail + '" fill="none" stroke="#000" stroke-opacity=".2" stroke-width=".5" stroke-linecap="round" stroke-linejoin="round"/>';
+    (g.dots || []).forEach(function (p) {
+      out += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r=".75" fill="#fff" fill-opacity=".85" stroke="#000" stroke-opacity=".3" stroke-width=".25"/>';
+    });
+    return out + '</g>';
+  }
+
   // A soft, filled mannequin. Wider with body-mass index and the chosen build, taller with height.
-  function figureSvg(heightCm, weightKg, build, size) {
+  // With dress = { kind, image, fit } it wears that garment.
+  function figureSvg(heightCm, weightKg, build, size, dress) {
     var bmi = weightKg / Math.pow(heightCm / 100, 2);
     var b = BUILDS.filter(function (x) { return x.value === build; })[0];
     var sx = Math.max(0.8, Math.min(1.4, (bmi / 22) * (b ? b.sx : 1)));
@@ -399,7 +503,7 @@
       '<ellipse cx="32" cy="13" rx="9" ry="10.5"/>' +
       '<path d="M28 23h8v5h-8z"/>' +
       '<path d="M18 30c4-3 9-3.5 14-3.5s10 .5 14 3.5c3 2 4 5 4.5 9l2.5 34c.2 3-1.5 5-3.5 5s-3.3-1.6-3.6-4L46 46l-1 30c0 6 .5 10 .5 14l-2 63c-.1 3-2 4.5-4.3 4.5s-4-1.6-4-4.4L33.5 94h-3L29 153c0 2.8-1.8 4.4-4 4.4s-4.2-1.5-4.3-4.5l-2-63c0-4 .5-8 .5-14l-1-30-2.4 28c-.3 2.4-1.6 4-3.6 4s-3.7-2-3.5-5l2.5-34c.5-4 1.5-7 4.5-9z"/>' +
-      '</g></svg>';
+      '</g>' + (dress ? garmentSvg(dress) : '') + '</svg>';
   }
 
   function init(root, settings) {
@@ -408,10 +512,12 @@
     var sizeValues = (root.getAttribute('data-size-values') || '').split('|').filter(Boolean);
     var product = {
       title: root.getAttribute('data-product-title') || '',
+      type: root.getAttribute('data-product-type') || '',
       price: root.getAttribute('data-product-price') || '',
       image: root.getAttribute('data-product-image') || '',
     };
     if (product.image.indexOf('//') === 0) product.image = 'https:' + product.image;
+    product.garment = garmentKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     var accent = /^#[0-9A-Fa-f]{6}$/.test(settings.accentColor || '') ? settings.accentColor : '#111827';
     var genders = Array.isArray(settings.genders) ? settings.genders : [];
     // Shoes / rings / bangles: one measurement instead of height, weight and build.
@@ -812,7 +918,7 @@
       creatingTimers.forEach(clearTimeout);
       creatingTimers = [setTimeout(function () {
         if (state.step !== 4) return;
-        state.status = 'Finalizing the render…';
+        state.status = 'Dressing your avatar…';
         var st = panel.querySelector('.ccf-sf-status');
         if (st) st.textContent = state.status;
       }, Math.round(CREATING_MS * 0.55))];
@@ -1243,14 +1349,17 @@
           av.appendChild(mme);
         } else {
         av = el('div', 'ccf-sf-avatar');
-        av.innerHTML = '<span class="ccf-sf-floor"></span>' + figureSvg(state.heightCm, state.weightKg, state.shape, 230);
-        }
-        if (!M && product.image) {
-          var wear = el('img', 'ccf-sf-wear');
-          wear.src = product.image;
-          wear.alt = '';
-          wear.loading = 'lazy';
-          av.appendChild(wear);
+        // The avatar wears this product; another size drapes looser or closer.
+        var sizesNow = chartSizes();
+        var fitStep = sizesNow.indexOf(String(pick)) - sizesNow.indexOf(String(r.size));
+        av.innerHTML = '<span class="ccf-sf-floor"></span>' + figureSvg(state.heightCm, state.weightKg, state.shape, 230,
+          { kind: product.garment, image: product.image, fit: sizesNow.indexOf(String(r.size)) === -1 ? 0 : fitStep });
+        av.setAttribute('role', 'img');
+        av.setAttribute('aria-label', 'Your avatar wearing ' + (product.title || 'this product') + ' in size ' + pick);
+        var wearing = el('span', 'ccf-sf-wearing');
+        wearing.appendChild(el('span', 'ccf-sf-wdot'));
+        wearing.appendChild(document.createTextNode('Wearing ' + pick));
+        av.appendChild(wearing);
         }
         if (!M) {
           var me = el('div', 'ccf-sf-me');
@@ -1418,5 +1527,5 @@
   document.addEventListener('shopify:section:load', start);
 
   // Exposed for tests
-  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage };
+  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind };
 })();

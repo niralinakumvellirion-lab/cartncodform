@@ -313,11 +313,57 @@ describe('ccf-size.js — "Try it on me" steps', () => {
     expect(btn('Close')).toBeTruthy();
   });
 
-  test('the product photo is worn on the mannequin (blended, no frame)', async () => {
+  test('the avatar wears the product: garment shape from the title, fabric from the product photo, "Wearing M"', async () => {
     await load({ pageHtml: ADD_PAGE() });
     await toResult('Woman');
-    expect(q('img.ccf-sf-wear')).not.toBeNull();
-    expect(q('img.ccf-sf-wear').src).toBe('https://cdn.shopify.com/k.jpg');
+    expect(q('img.ccf-sf-wear')).toBeNull(); // no flat photo any more
+    const g = q('.ccf-sf-avatar .ccf-sf-garment');
+    expect(g.getAttribute('data-kind')).toBe('kurta'); // "Cotton Kurta"
+    expect(q('.ccf-sf-avatar pattern image').getAttribute('href')).toBe('https://cdn.shopify.com/k.jpg');
+    expect(g.getAttribute('transform')).toContain('scale(1.000 1.000)');
+    expect(q('.ccf-sf-wearing').textContent).toBe('Wearing M');
+    expect(q('.ccf-sf-avatar').getAttribute('aria-label')).toBe('Your avatar wearing Cotton Kurta in size M');
+  });
+
+  test('another size drapes looser or closer on the avatar', async () => {
+    await load({ pageHtml: ADD_PAGE() });
+    await toResult('Woman');
+    btn('S — Fits close').click();
+    expect(q('.ccf-sf-garment').getAttribute('transform')).toContain('scale(0.955 0.985)');
+    expect(q('.ccf-sf-wearing').textContent).toBe('Wearing S');
+    await load({ pageHtml: ADD_PAGE(), recommend: { ok: true, size: 'S', outOfRange: false, reasons: [] } });
+    await toResult('Woman');
+    btn('M — Roomy fit').click();
+    expect(q('.ccf-sf-garment').getAttribute('transform')).toContain('scale(1.045 1.015)');
+    expect(q('.ccf-sf-wearing').textContent).toBe('Wearing M');
+  });
+
+  test('garment from title / type / tags: t-shirt before shirt; unknown → t-shirt', async () => {
+    await load();
+    const kind = window.__ccfSizeFinder.garmentKind;
+    expect(kind('Oversized Graphic T-Shirt', '', '')).toBe('tshirt');
+    expect(kind('Linen Shirt', '', '')).toBe('shirt');
+    expect(kind('Floral Maxi', 'Dresses', '')).toBe('dress');
+    expect(kind('Banarasi Silk Saree', '', '')).toBe('saree');
+    expect(kind('Slim fit', 'Jeans', '')).toBe('pants');
+    expect(kind('Summer co-ord', '', 'shorts sale')).toBe('shorts');
+    expect(kind('Zip Hoodie', '', '')).toBe('hoodie');
+    expect(kind('Pleated midi', '', 'skirt')).toBe('skirt');
+    expect(kind('Anarkali Kurta Set', '', '')).toBe('dress');
+    expect(kind('Something', '', '')).toBe('tshirt');
+  });
+
+  test('"Dressing your avatar…" while the size is worked out', async () => {
+    window.__ccfSizeCreatingMs = 60;
+    await load();
+    open();
+    btn('Woman').click();
+    btn('Continue').click();
+    btn('Continue').click();
+    await wait(45);
+    expect(q('.ccf-sf-status').textContent).toBe('Dressing your avatar…');
+    await wait(60);
+    window.__ccfSizeCreatingMs = 0;
   });
 
   test('server error → back on the build step with the message', async () => {
