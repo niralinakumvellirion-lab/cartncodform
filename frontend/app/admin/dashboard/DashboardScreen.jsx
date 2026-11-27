@@ -11,6 +11,7 @@ import MultiDateScheduler from '../components/MultiDateScheduler';
 import DateRangeFilter, { DATE_FILTERS, getDateRange } from '../components/DateRangeFilter';
 import { ChannelCard, ChannelDrawer } from './ChannelCards';
 import SetupGuideCard from '../components/SetupGuideCard';
+import MoneyCard from './MoneyCard';
 
 const DS = {
   page: {
@@ -1319,6 +1320,9 @@ export default function DashboardScreen({ shop }) {
 
         {/* LEFT — main content */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* MONEY EARNED — orders our messages brought back */}
+          <MoneyCard shop={shop} />
 
           {/* CHANNEL CARDS — Push / Email / WhatsApp */}
           <div style={{

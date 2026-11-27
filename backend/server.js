@@ -203,6 +203,7 @@ app.use('/apps/cartncodform', proxyRouter);
 app.use('/api/size-finder', require('./routes/sizeFinder'));
 app.use('/api/restock', require('./routes/restock'));
 app.use('/api/price-drop', require('./routes/priceDrop'));
+app.use('/api/money', require('./routes/money'));
 // Public unsubscribe endpoint — no requireAuth, has its own rate limiter.
 const unsubscribeRouter = require('./routes/unsubscribe');
 app.use('/api/unsubscribe', unsubscribeRouter);
