@@ -205,7 +205,9 @@
       '.ccf-sf-hero{margin:12px 0 0;padding:12px 14px;border-radius:14px;background:#FAFAF9;border:1px solid #EFEEEC}',
       '.ccf-sf-rtitle{margin:0;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6B7280}',
       '.ccf-sf-big{display:flex;align-items:center;gap:10px;margin:4px 0 2px}',
-      '.ccf-sf-big b{font-size:34px;line-height:1;font-weight:750;letter-spacing:-.02em;color:#111}',
+      '.ccf-sf-big{flex-wrap:wrap;row-gap:6px}',
+      '.ccf-sf-big b{font-size:34px;line-height:1;font-weight:750;letter-spacing:-.02em;color:#111;white-space:nowrap}',
+      '.ccf-sf-big b.is-long{font-size:26px}',
       '.ccf-sf-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:650;background:#DCFCE7;color:#166534}',
       '.ccf-sf-pill svg{width:12px;height:12px}',
       '.ccf-sf-pill.is-alt{background:#FEF3C7;color:#92400E}',
@@ -274,6 +276,8 @@
       '.ccf-sf-pvis.is-shoe{flex-direction:column;justify-content:center;gap:10px;padding:46px 12px 44px}',
       '.ccf-sf-pvis .ccf-sf-shoe{width:100%;max-width:250px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
       '.ccf-sf-toe{width:100%;max-width:220px}',
+      '.ccf-sf-pvis.is-baby{flex-direction:column;justify-content:flex-end;gap:8px;padding:40px 12px 44px}',
+      '.ccf-sf-pvis .ccf-sf-baby{width:100%;max-width:120px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.06))}',
       '.ccf-sf-pvis.is-bangle{flex-direction:column;justify-content:center;gap:8px;padding:40px 12px 44px}',
       '.ccf-sf-pvis .ccf-sf-bangle{width:100%;max-width:140px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
       '.ccf-sf-pvis.is-ring{flex-direction:column;justify-content:center;gap:8px;padding:40px 12px 44px}',
@@ -776,6 +780,126 @@
     return { pos: pos, zone: 'roomy', text: v + ' mm extra — loose on the wrist' };
   }
 
+  // ── A baby wearing the product (baby & kids clothes stores) ──
+  // viewBox 90×140: a sleeping baby (big head, chubby arms and legs) that grows with length and weight,
+  // dressed in the product's outfit shape filled with the product photo, shading and small details.
+  var BABY_OUTFITS = {
+    romper: {
+      body: ['M30 44Q45 49 60 44L66 50L64 60L60 58L61 78Q60 90 52 92L47 86H43L38 92Q30 90 29 78L30 58L26 60L24 50Z'],
+      detail: 'M30 44Q45 49 60 44M32 47Q45 52 58 47M60 58L64 60M30 58L26 60M38 92Q45 88 52 92',
+      dots: [[45, 80], [42, 85], [48, 85]],
+    },
+    dress: {
+      body: ['M30 44Q45 49 60 44L64 49L62 56L60 55L61 66Q70 84 72 98Q45 104 18 98Q20 84 29 66L30 55L28 56L26 49Z'],
+      detail: 'M30 44Q45 49 60 44M29 66Q45 69 61 66M19 95Q45 101 71 95M36 70L30 98M45 70V101M54 70L60 98',
+      dots: [[45, 52], [45, 58]],
+    },
+    top: {
+      body: ['M30 44Q45 49 60 44L66 50L64 60L60 58L61 76Q45 80 29 76L30 58L26 60L24 50Z'],
+      detail: 'M30 44Q45 49 60 44M37 46L57 74M55 62L50 66M55 62L58 67M29 74Q45 78 61 74',
+    },
+    set: {
+      body: ['M30 44Q45 49 60 44L66 50L64 60L60 58L61 74Q45 78 29 74L30 58L26 60L24 50Z', 'M30 74H60L62 92L48 94L45 86L42 94L28 92Z'],
+      detail: 'M30 44Q45 49 60 44M29 72Q45 76 61 72M30 77H60M45 77V86',
+    },
+    pants: {
+      body: ['M30 74H60L60 112L48 114L45 86L42 114L30 112Z'],
+      detail: 'M30 77H60M45 77V86M30 109H42M48 109H60',
+    },
+    kurta: {
+      body: ['M30 44Q45 49 60 44L66 50L65 66L61 65L62 98Q45 102 28 98L29 65L25 66L24 50Z'],
+      detail: 'M30 44Q45 49 60 44M45 47V62M61 65L65 66M29 65L25 66M29 95Q45 99 61 95M61 84L62 98M29 84L28 98',
+      dots: [[45, 51], [45, 55], [45, 59]],
+    },
+  };
+  var BABY_WORDS = [
+    ['dress', ['frock', 'frocks', 'dress', 'dresses', 'gown', 'skirt', 'lehenga']],
+    ['kurta', ['kurta', 'kurtas', 'kurti', 'sherwani', 'dhoti']],
+    ['set', ['set', 'sets', 'co', 'ord', 'combo', 'outfit', 'shorts']],
+    ['pants', ['pant', 'pants', 'pyjama', 'pajama', 'joggers', 'leggings', 'trousers', 'jeans']],
+    ['top', ['jhabla', 'jabla', 'top', 'tops', 'tee', 'tshirt', 't', 'shirt', 'vest']],
+    ['romper', ['romper', 'rompers', 'onesie', 'onesies', 'bodysuit', 'sleepsuit', 'jumpsuit', 'dungaree']],
+  ];
+  function babyOutfit(title, type, tags) {
+    var t = ' ' + [title, type, tags].join(' ').toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
+    for (var i = 0; i < BABY_WORDS.length; i++) {
+      for (var j = 0; j < BABY_WORDS[i][1].length; j++) {
+        if (t.indexOf(' ' + BABY_WORDS[i][1][j] + ' ') !== -1) return BABY_WORDS[i][0];
+      }
+    }
+    return 'romper';
+  }
+  // baby = { lengthCm, weightKg, outfit, image, fit }
+  function babySvg(baby) {
+    var g = BABY_OUTFITS[baby.outfit] || BABY_OUTFITS.romper;
+    var n = Math.floor(Math.random() * 1e6);
+    var fab = 'ccfsfbbfab' + n, sh = 'ccfsfbbsh' + n, skin = 'ccfsfbbskin' + n;
+    var bmi = baby.weightKg / Math.pow(baby.lengthCm / 100, 2);
+    var sx = Math.max(0.85, Math.min(1.25, bmi / 16)), sy = Math.max(0.72, Math.min(1.25, baby.lengthCm / 85));
+    var f = Math.max(-2, Math.min(2, baby.fit || 0));
+    var gx = (1 + 0.05 * f).toFixed(3), gy = (1 + 0.025 * f).toFixed(3);
+    var limbs = 'M30 46Q22 50 20 62Q19 70 23 72Q27 72 28 66L31 54Z M60 46Q68 50 70 62Q71 70 67 72Q63 72 62 66L59 54Z' +
+      'M31 78Q30 98 32 112Q32 120 38 120Q43 119 43 112L44 82Z M59 78Q60 98 58 112Q58 120 52 120Q47 119 47 112L46 82Z';
+    var out = '<svg class="ccf-sf-baby" data-outfit="' + baby.outfit + '" viewBox="0 0 90 140" aria-hidden="true">' +
+      '<defs>' +
+      '<pattern id="' + fab + '" patternContentUnits="objectBoundingBox" width="1" height="1">' +
+        '<rect width="1" height="1" fill="#BFD6EE"/>' +
+        (baby.image ? '<image href="' + attr(baby.image) + '" x="-0.5" y="-0.3" width="2" height="1.6" preserveAspectRatio="xMidYMid slice"/>' : '') +
+      '</pattern>' +
+      '<linearGradient id="' + sh + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".2"/>' +
+        '<stop offset=".3" stop-color="#fff" stop-opacity=".12"/><stop offset=".7" stop-color="#000" stop-opacity="0"/>' +
+        '<stop offset="1" stop-color="#000" stop-opacity=".22"/></linearGradient>' +
+      '<radialGradient id="' + skin + '" cx=".45" cy=".35" r=".75"><stop offset="0" stop-color="#FBE9DA"/>' +
+        '<stop offset="1" stop-color="#EBC9AC"/></radialGradient>' +
+      '</defs>' +
+      '<ellipse cx="45" cy="131" rx="26" ry="4" fill="#000" fill-opacity=".1"/>' +
+      '<g transform="translate(45 124) scale(' + sx.toFixed(3) + ' ' + sy.toFixed(3) + ') translate(-45 -124)">' +
+      // body: limbs, torso, feet, then the outfit, then the head on top
+      '<path d="' + limbs + '" fill="url(#' + skin + ')" stroke="#D9B89A" stroke-width=".7"/>' +
+      '<path d="M30 44Q45 40 60 44L62 78Q45 84 28 78Z" fill="url(#' + skin + ')" stroke="#D9B89A" stroke-width=".7"/>' +
+      '<ellipse cx="37" cy="121" rx="7" ry="4" fill="url(#' + skin + ')" stroke="#D9B89A" stroke-width=".7"/>' +
+      '<ellipse cx="53" cy="121" rx="7" ry="4" fill="url(#' + skin + ')" stroke="#D9B89A" stroke-width=".7"/>' +
+      '<g class="ccf-sf-outfit" transform="translate(45 70) scale(' + gx + ' ' + gy + ') translate(-45 -70)">';
+    g.body.forEach(function (d) {
+      out += '<path d="' + d + '" fill="url(#' + fab + ')"/><path d="' + d + '" fill="url(#' + sh + ')"/>' +
+        '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".25" stroke-width=".6" stroke-linejoin="round"/>';
+    });
+    out += '<path d="' + g.detail + '" fill="none" stroke="#000" stroke-opacity=".2" stroke-width=".6" stroke-linecap="round"/>';
+    (g.dots || []).forEach(function (p) {
+      out += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="1" fill="#fff" fill-opacity=".9" stroke="#000" stroke-opacity=".25" stroke-width=".3"/>';
+    });
+    out += '</g>' +
+      '<circle cx="27" cy="27" r="4" fill="url(#' + skin + ')" stroke="#D9B89A" stroke-width=".7"/>' +
+      '<circle cx="63" cy="27" r="4" fill="url(#' + skin + ')" stroke="#D9B89A" stroke-width=".7"/>' +
+      '<circle cx="45" cy="26" r="18" fill="url(#' + skin + ')" stroke="#D9B89A" stroke-width=".7"/>' +
+      '<path d="M40 9Q45 4 49 9Q46 7 44 10" fill="none" stroke="#8B6B52" stroke-width="1.2" stroke-linecap="round"/>' +
+      '<path d="M36 27Q39 29.5 42 27M48 27Q51 29.5 54 27" fill="none" stroke="#6B4F3A" stroke-width="1.1" stroke-linecap="round"/>' +
+      '<path d="M41 34Q45 37 49 34" fill="none" stroke="#C0705E" stroke-width="1.1" stroke-linecap="round"/>' +
+      '<circle cx="34" cy="32" r="2.6" fill="#F4A6A0" fill-opacity=".45"/><circle cx="56" cy="32" r="2.6" fill="#F4A6A0" fill-opacity=".45"/>' +
+      '</g></svg>';
+    return out;
+  }
+  // Grow meter: by length (cm left in the size) or by age (months left in the size).
+  function babyRoom(left, byAge) {
+    var v = Math.round(left * 10) / 10;
+    if (byAge) {
+      var pos = Math.max(4, Math.min(96, ((v + 3) / 12) * 100));
+      if (v <= 0) return { pos: pos, zone: 'tight', text: 'Outgrown — ' + Math.abs(v) + ' months past this size' };
+      if (v <= 3) return { pos: pos, zone: 'right', text: v + (v === 1 ? ' month' : ' months') + ' left in this size — fits now' };
+      return { pos: pos, zone: 'roomy', text: v + ' months to grow into' };
+    }
+    var p = Math.max(4, Math.min(96, ((v + 3) / 11) * 100));
+    if (v < 0) return { pos: p, zone: 'tight', text: Math.abs(v) + ' cm longer than this size — too small' };
+    if (v <= 4) return { pos: p, zone: 'right', text: v + ' cm room — fits now' };
+    return { pos: p, zone: 'roomy', text: v + ' cm room to grow' };
+  }
+  // Rough length / weight for an age in months, to draw the baby when only the age is known.
+  function babyFromAge(m) {
+    var len = m <= 12 ? 50 + m * 2.2 : 76.4 + (m - 12) * 0.9;
+    var wt = m <= 12 ? 3.3 + m * 0.55 : 9.9 + (m - 12) * 0.2;
+    return { lengthCm: len, weightKg: wt };
+  }
+
   // A soft, filled mannequin. Wider with body-mass index and the chosen build, taller with height.
   // With dress = { kind, image, fit } it wears that garment.
   function figureSvg(heightCm, weightKg, build, size, dress) {
@@ -806,6 +930,7 @@
       image: root.getAttribute('data-product-image') || '',
     };
     if (product.image.indexOf('//') === 0) product.image = 'https:' + product.image;
+    product.babyOutfit = babyOutfit(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.bangle = bangleKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.ring = ringKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.shoe = shoeKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
@@ -1698,6 +1823,28 @@
           var bme = el('div', 'ccf-sf-me');
           bme.appendChild(el('span', null, shortMeasure()));
           av.appendChild(bme);
+        } else if (BB) {
+          // The baby wearing the outfit, with a "Wearing 3-6 M" chip and a grow meter.
+          var kSizes = chartSizes();
+          var kAt = kSizes.indexOf(String(r.size));
+          var byAge = state.bmode === 'age';
+          var kidBody = byAge ? babyFromAge(state.bage) : { lengthCm: state.blen, weightKg: state.bwt };
+          av = el('div', 'ccf-sf-pvis is-baby');
+          av.setAttribute('role', 'img');
+          av.setAttribute('aria-label', 'Your baby wearing ' + (product.title || 'this outfit') + ' in size ' + pick);
+          av.insertAdjacentHTML('beforeend', babySvg({
+            lengthCm: kidBody.lengthCm, weightKg: kidBody.weightKg, outfit: product.babyOutfit, image: product.image,
+            fit: kAt === -1 ? 0 : kSizes.indexOf(String(pick)) - kAt,
+          }));
+          var kw = el('span', 'ccf-sf-wearing');
+          kw.appendChild(el('span', 'ccf-sf-wdot'));
+          kw.appendChild(document.createTextNode('Wearing ' + pick));
+          av.appendChild(kw);
+          var kRow = BB.chart.filter(function (c) { return String(c.size) === String(pick); })[0];
+          if (kRow) av.appendChild(fitMeter(byAge ? babyRoom(kRow.maxAge - Math.round(state.bage), true) : babyRoom(kRow.maxLength - state.blen, false)));
+          var kme = el('div', 'ccf-sf-me');
+          kme.appendChild(el('span', null, shortMeasure()));
+          av.appendChild(kme);
         } else if (M) {
           av = el('div', 'ccf-sf-pvis');
           if (product.image) {
@@ -1761,7 +1908,7 @@
         var hero = el('div', 'ccf-sf-hero');
         hero.appendChild(el('p', 'ccf-sf-rtitle', T('resultTitle')));
         var big = el('div', 'ccf-sf-big');
-        big.appendChild(el('b', null, String(pick)));
+        big.appendChild(el('b', String(pick).length > 3 ? 'is-long' : null, String(pick)));
         if (sells(pick)) {
           var pill = el('span', 'ccf-sf-pill' + (isBest ? '' : ' is-alt'));
           pill.innerHTML = isBest ? CHECK : '';
@@ -1894,5 +2041,5 @@
   document.addEventListener('shopify:section:load', start);
 
   // Exposed for tests
-  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind, shoeKind: shoeKind, toeRoom: toeRoom, ringKind: ringKind, ringRoom: ringRoom, bangleKind: bangleKind, bangleRoom: bangleRoom };
+  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind, shoeKind: shoeKind, toeRoom: toeRoom, ringKind: ringKind, ringRoom: ringRoom, bangleKind: bangleKind, bangleRoom: bangleRoom, babyOutfit: babyOutfit, babyRoom: babyRoom };
 })();

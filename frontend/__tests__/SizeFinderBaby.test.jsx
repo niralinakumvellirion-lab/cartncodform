@@ -82,6 +82,9 @@ describe('baby & kids clothes', () => {
     }));
     expect(await within(frame).findByText('Fits now — within this size')).toBeInTheDocument();
     expect(within(frame).getByText('68 cm · 8 kg')).toBeInTheDocument();
+    expect(frame.querySelector('.sfp-pvis.is-baby .sfp-baby')).toHaveAttribute('data-outfit', 'romper');
+    expect(frame.querySelector('.sfp-wearing')).toHaveTextContent('Wearing 3-6 M');
+    expect(frame.querySelector('.sfp-toe')).toHaveTextContent('0 cm room — fits now');
     expect(within(frame).getByText('Cotton Baby Romper')).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole('group', { name: 'Preview screen' })).getByRole('button', { name: 'Measure' }));
     expect(within(frame).getByText('Tell us about your baby')).toBeInTheDocument();

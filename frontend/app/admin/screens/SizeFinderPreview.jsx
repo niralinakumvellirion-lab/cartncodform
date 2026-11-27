@@ -119,6 +119,36 @@ function Garment({ id }) {
   );
 }
 
+// Sample baby in a romper in the baby preview (on the store the outfit is the product photo) — same figure as ccf-size.js.
+function SampleBaby() {
+  const romper = 'M30 44Q45 49 60 44L66 50L64 60L60 58L61 78Q60 90 52 92L47 86H43L38 92Q30 90 29 78L30 58L26 60L24 50Z';
+  const skin = 'url(#sfpbabyskin)';
+  return (
+    <svg className="sfp-baby" data-outfit="romper" viewBox="0 0 90 140" aria-hidden="true">
+      <defs>
+        <pattern id="sfpbabyf" width="6" height="6" patternUnits="userSpaceOnUse">
+          <rect width="6" height="6" fill="#BFD6EE" /><circle cx="3" cy="3" r="1" fill="#fff" fillOpacity=".8" />
+        </pattern>
+        <radialGradient id="sfpbabyskin" cx=".45" cy=".35" r=".75"><stop offset="0" stopColor="#FBE9DA" /><stop offset="1" stopColor="#EBC9AC" /></radialGradient>
+      </defs>
+      <ellipse cx="45" cy="131" rx="26" ry="4" fill="#000" fillOpacity=".1" />
+      <path d="M30 46Q22 50 20 62Q19 70 23 72Q27 72 28 66L31 54Z M60 46Q68 50 70 62Q71 70 67 72Q63 72 62 66L59 54ZM31 78Q30 98 32 112Q32 120 38 120Q43 119 43 112L44 82Z M59 78Q60 98 58 112Q58 120 52 120Q47 119 47 112L46 82Z" fill={skin} stroke="#D9B89A" strokeWidth=".7" />
+      <ellipse cx="37" cy="121" rx="7" ry="4" fill={skin} stroke="#D9B89A" strokeWidth=".7" />
+      <ellipse cx="53" cy="121" rx="7" ry="4" fill={skin} stroke="#D9B89A" strokeWidth=".7" />
+      <path d={romper} fill="url(#sfpbabyf)" stroke="#000" strokeOpacity=".25" strokeWidth=".6" />
+      <path d="M32 47Q45 52 58 47M38 92Q45 88 52 92" fill="none" stroke="#000" strokeOpacity=".2" strokeWidth=".6" />
+      {[[45, 80], [42, 85], [48, 85]].map(([x, y]) => <circle key={`${x}${y}`} cx={x} cy={y} r="1" fill="#fff" stroke="#000" strokeOpacity=".25" strokeWidth=".3" />)}
+      <circle cx="27" cy="27" r="4" fill={skin} stroke="#D9B89A" strokeWidth=".7" />
+      <circle cx="63" cy="27" r="4" fill={skin} stroke="#D9B89A" strokeWidth=".7" />
+      <circle cx="45" cy="26" r="18" fill={skin} stroke="#D9B89A" strokeWidth=".7" />
+      <path d="M40 9Q45 4 49 9Q46 7 44 10" fill="none" stroke="#8B6B52" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M36 27Q39 29.5 42 27M48 27Q51 29.5 54 27" fill="none" stroke="#6B4F3A" strokeWidth="1.1" strokeLinecap="round" />
+      <path d="M41 34Q45 37 49 34" fill="none" stroke="#C0705E" strokeWidth="1.1" strokeLinecap="round" />
+      <circle cx="34" cy="32" r="2.6" fill="#F4A6A0" fillOpacity=".45" /><circle cx="56" cy="32" r="2.6" fill="#F4A6A0" fillOpacity=".45" />
+    </svg>
+  );
+}
+
 // Sample bangle set on a wrist in the bangles preview (on the store the bangles are the product photo).
 function SampleBangles() {
   const band = (cy, top) => (top
@@ -443,8 +473,27 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {!error && result && (
               <>
                 <div className="sfp-result">
-                  <div className={`sfp-pvis${storeType === 'shoes' ? ' is-shoe' : storeType === 'rings' ? ' is-ring' : storeType === 'bangles' ? ' is-bangle' : ''}`}>
-                    {storeType === 'bangles' ? (
+                  <div className={`sfp-pvis${storeType === 'shoes' ? ' is-shoe' : storeType === 'rings' ? ' is-ring' : storeType === 'bangles' ? ' is-bangle' : baby ? ' is-baby' : ''}`}>
+                    {baby ? (
+                      <>
+                        <span className="sfp-wearing"><i />Wearing {result.size}</span>
+                        <SampleBaby />
+                        {(() => {
+                          const row = chart.find((c) => String(c.size) === String(result.size));
+                          if (!row) return null;
+                          const v = Math.round((row.maxLength - baby.length.start) * 10) / 10;
+                          const zone = v < 0 ? 'tight' : v <= 4 ? 'right' : 'roomy';
+                          const pos = Math.max(4, Math.min(96, ((v + 3) / 11) * 100));
+                          const text = v < 0 ? `${Math.abs(v)} cm longer than this size — too small` : v <= 4 ? `${v} cm room — fits now` : `${v} cm room to grow`;
+                          return (
+                            <div className={`sfp-toe is-${zone}`}>
+                              <div className="sfp-toebar"><span className="is-tight" /><span className="is-right" /><span className="is-roomy" /><i style={{ left: `${pos}%` }} /></div>
+                              <p>{text}</p>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    ) : storeType === 'bangles' ? (
                       <>
                         <span className="sfp-wearing"><i />Wearing {result.size}</span>
                         <SampleBangles />
@@ -873,6 +922,8 @@ const CSS = `
 .sfp-howto ol{margin:4px 0 0;padding-left:15px;display:flex;flex-direction:column;gap:2px;line-height:1.35}
 .sfp-pvis{position:relative;border-radius:14px;background:radial-gradient(120% 70% at 50% 18%,#FFFFFF 0,#F4F3F0 55%,#E9E7E2 100%);min-height:170px;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
 .sfp-pvis.is-shoe{flex-direction:column;gap:6px;padding:28px 8px 30px}
+.sfp-pvis.is-baby{flex-direction:column;gap:6px;padding:26px 8px 30px;justify-content:flex-end}
+.sfp-baby{width:100%;max-width:80px;height:auto}
 .sfp-pvis.is-bangle{flex-direction:column;gap:6px;padding:26px 8px 30px}
 .sfp-bangle{width:100%;max-width:100px;height:auto;filter:drop-shadow(0 3px 6px rgba(0,0,0,.08))}
 .sfp-pvis.is-ring{flex-direction:column;gap:6px;padding:26px 8px 30px}

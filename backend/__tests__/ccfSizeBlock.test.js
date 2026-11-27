@@ -671,7 +671,12 @@ describe('ccf-size.js — baby clothes', () => {
     expect(q('.ccf-sf-big b').textContent).toBe('3-6 M');
     expect(q('.ccf-sf-fit').textContent).toBe('Fits now — within this size for length and weight');
     expect(q('.ccf-sf-me').textContent).toBe('68 cm · 8 kg');
-    expect(q('.ccf-sf-pvis img').src).toBe('https://cdn.shopify.com/r.jpg');
+    // The baby wears the outfit (Cotton Romper → romper), filled with the photo, with a grow meter.
+    expect(q('.ccf-sf-pvis.is-baby .ccf-sf-baby').getAttribute('data-outfit')).toBe('romper');
+    expect(q('.ccf-sf-baby pattern image').getAttribute('href')).toBe('https://cdn.shopify.com/r.jpg');
+    expect(q('.ccf-sf-pvis .ccf-sf-wearing').textContent).toBe('Wearing 3-6 M');
+    expect(q('.ccf-sf-toetext').textContent).toBe('0 cm room — fits now');
+    expect(q('.ccf-sf-pvis').getAttribute('aria-label')).toBe('Your baby wearing Cotton Romper in size 3-6 M');
     btn('View size chart').click();
     expect(Array.from(document.querySelectorAll('.ccf-sf-table th')).map((x) => x.textContent)).toEqual(['Size', 'Length (cm)', 'Weight (kg)', 'Age']);
     expect(q('.ccf-sf-table tr.is-you').textContent).toBe('3-6 Mup to 68up to 83–6 m');
@@ -688,6 +693,7 @@ describe('ccf-size.js — baby clothes', () => {
     expect(recommendBodies.at(-1)).toEqual({ mode: 'age', ageMonths: 6, grow: true, remember: false, sessionId: '' });
     expect(q('.ccf-sf-fit').textContent).toBe('Room to grow — one size up');
     expect(q('.ccf-sf-me').textContent).toBe('Age 6 months');
+    expect(q('.ccf-sf-toetext').textContent).toBe('3 months left in this size — fits now');
   });
 
   test('remember: the answers stay on this device; only the size goes to the server', async () => {
@@ -813,5 +819,30 @@ describe('ccf-size.js — bangles worn on a wrist', () => {
     const room = window.__ccfSizeFinder.bangleRoom;
     expect(room(-1)).toMatchObject({ zone: 'tight', text: '1 mm smaller than your hand — hard to slip on' });
     expect(room(0)).toMatchObject({ zone: 'right', text: 'Exact fit — slides on, sits well' });
+  });
+});
+
+describe('ccf-size.js — baby outfit words and grow meter', () => {
+  test('outfit from title / type / tags; unknown → romper', async () => {
+    await load();
+    const kind = window.__ccfSizeFinder.babyOutfit;
+    expect(kind('Floral Baby Frock', '', '')).toBe('dress');
+    expect(kind('Cotton Jhabla', '', '')).toBe('top');
+    expect(kind('Baby Kurta Pyjama', '', '')).toBe('kurta');
+    expect(kind('Summer Shorts Set', '', '')).toBe('set');
+    expect(kind('Ribbed Joggers', '', '')).toBe('pants');
+    expect(kind('Organic Onesie', '', '')).toBe('romper');
+    expect(kind('Something', '', '')).toBe('romper');
+  });
+
+  test('grow meter by length and by age', async () => {
+    await load();
+    const room = window.__ccfSizeFinder.babyRoom;
+    expect(room(-2, false)).toMatchObject({ zone: 'tight', text: '2 cm longer than this size — too small' });
+    expect(room(3, false)).toMatchObject({ zone: 'right', text: '3 cm room — fits now' });
+    expect(room(6, false)).toMatchObject({ zone: 'roomy', text: '6 cm room to grow' });
+    expect(room(1, true)).toMatchObject({ zone: 'right', text: '1 month left in this size — fits now' });
+    expect(room(6, true)).toMatchObject({ zone: 'roomy', text: '6 months to grow into' });
+    expect(room(-2, true)).toMatchObject({ zone: 'tight', text: 'Outgrown — 2 months past this size' });
   });
 });
