@@ -67,7 +67,9 @@ function Wait-Port($port, $name, $seconds) {
 # Replace KEY=... lines (adds the line when missing). Only the named keys change.
 function Set-EnvLines($path, $values) {
   $lines = @()
-  if (Test-Path $path) { $lines = @(Get-Content $path) }
+  # Read as UTF-8 (the file is written as UTF-8 below). Windows PowerShell's default would read it as
+  # ANSI, so every run garbled non-ASCII characters a bit more and the file grew to hundreds of MB.
+  if (Test-Path $path) { $lines = @(Get-Content -Encoding UTF8 $path) }
   foreach ($key in $values.Keys) {
     $line = "$key=$($values[$key])"
     $hit = $false
