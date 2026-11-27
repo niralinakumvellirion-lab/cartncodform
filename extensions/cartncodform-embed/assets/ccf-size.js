@@ -981,11 +981,21 @@
     }
 
     // The theme's add-to-cart button for this product, if there is one we can press.
+    // Themes can have several /cart/add forms (e.g. Dawn's hidden payment-terms form): use the first one that
+    // has a submit button — in this product's section first, then anywhere on the page.
+    var ADD_WAIT_MS = typeof window.__ccfSizeAddWaitMs === 'number' ? window.__ccfSizeAddWaitMs : 2500;
+    var ADD_BTN = 'button[type="submit"][name="add"], button[name="add"], button[type="submit"], input[type="submit"]';
     function addButton() {
-      var scope = root.closest('.shopify-section') || document;
-      var form = scope.querySelector('form[action*="/cart/add"]') || document.querySelector('form[action*="/cart/add"]');
-      if (!form) return null;
-      return form.querySelector('button[type="submit"][name="add"], button[name="add"], button[type="submit"], input[type="submit"]');
+      var scopes = [root.closest('.shopify-section'), document];
+      for (var i = 0; i < scopes.length; i++) {
+        if (!scopes[i]) continue;
+        var forms = scopes[i].querySelectorAll('form[action*="/cart/add"]');
+        for (var j = 0; j < forms.length; j++) {
+          var b = forms[j].querySelector(ADD_BTN);
+          if (b) return b;
+        }
+      }
+      return null;
     }
 
     function chooseSize(size, addToBag) {
@@ -998,18 +1008,23 @@
       remember({ size: size });
       setOpenLabel(size);
       if (!addToBag) { close(); return; }
-      // Themes swap the variant after the size changes; press "Add to cart" once that has happened.
-      setTimeout(function () {
+      // Themes swap the variant after the size changes and disable their button while they do (Dawn re-renders
+      // the section). Press "Add to cart" once it is enabled again; only if it stays disabled is the size sold out.
+      var waited = 0;
+      (function tryAdd() {
         var b = addButton();
         if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') {
           state.added = true;
           draw();
           setTimeout(function () { close(); b.click(); }, 450);
+        } else if (waited < ADD_WAIT_MS) {
+          waited += 150;
+          setTimeout(tryAdd, 150);
         } else {
           state.error = 'Size ' + size + ' is sold out right now.';
           draw();
         }
-      }, 350);
+      })();
     }
 
     function privacy(foot) {

@@ -273,15 +273,35 @@ describe('ccf-size.js — "Try it on me" steps', () => {
     expect(q('.ccf-sf-panel').hidden).toBe(true);
   });
 
-  test('picking another size changes the button; sold-out theme button → message', async () => {
+  test('picking another size changes the button; theme button stays disabled → sold out', async () => {
+    window.__ccfSizeAddWaitMs = 300;
     await load({ pageHtml: ADD_PAGE('disabled') });
     await toResult('Woman');
     btn('S — Fits close').click();
     expect(q('.ccf-sf-main').textContent).toBe('Add to cart');
     expect(btn('Just select size S')).toBeTruthy();
+    try {
+      q('.ccf-sf-main').click();
+      await wait(150);
+      expect(q('.ccf-sf-err')).toBeNull(); // still waiting for the theme
+      await wait(450);
+      expect(q('.ccf-sf-err').textContent).toBe('Size S is sold out right now.');
+    } finally {
+      delete window.__ccfSizeAddWaitMs;
+    }
+  });
+
+  test('theme disables its button while it swaps the size, then enables it → still added', async () => {
+    await load({ pageHtml: ADD_PAGE('disabled') });
+    let added = 0;
+    q('#theme-add').addEventListener('click', (e) => { e.preventDefault(); added += 1; });
+    await toResult('Woman');
     q('.ccf-sf-main').click();
-    await wait(400);
-    expect(q('.ccf-sf-err').textContent).toBe('Size S is sold out right now.');
+    await wait(700);
+    q('#theme-add').disabled = false; // the theme finished re-rendering
+    await wait(900);
+    expect(added).toBe(1);
+    expect(q('.ccf-sf-err')).toBeNull();
   });
 
   test('a size the product does not sell is marked; the nearest sold size is picked instead', async () => {
@@ -667,5 +687,24 @@ describe('ccf-size.js — baby clothes', () => {
     expect(recommendBodies.at(-1)).toMatchObject({ remember: true });
     const stored = JSON.parse(localStorage.getItem('ccf_size_answers_demo.myshopify.com'));
     expect(stored).toMatchObject({ blen: 68, bwt: 8, bmode: 'measure', grow: false });
+  });
+});
+
+describe('ccf-size.js — add to cart on themes with several cart forms', () => {
+  test('a button-less /cart/add form first (Dawn payment terms) → still uses the real Add to cart', async () => {
+    await load({ pageHtml: `
+      <div class="shopify-section">
+        <form action="/cart/add" id="installment"><input type="hidden" name="id" value="1"></form>
+        <form action="/cart/add">
+          <fieldset><legend>Size</legend>
+            <input type="radio" name="Size" value="S" checked><input type="radio" name="Size" value="M">
+          </fieldset>
+          <button type="submit" name="add" id="real-add">Add to cart</button>
+        </form>
+        <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M"
+             data-product-title="Tee" data-design-mode="false"></div>
+      </div>` });
+    await toResult('Woman');
+    expect(q('.ccf-sf-main').textContent).toBe('Add to cart');
   });
 });
