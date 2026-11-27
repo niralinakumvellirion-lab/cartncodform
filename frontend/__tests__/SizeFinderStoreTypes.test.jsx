@@ -174,3 +174,17 @@ describe('shoes preview', () => {
     expect(frame.querySelector('.sfp-toe')).toHaveTextContent('0.4 cm toe room — just right');
   });
 });
+
+describe('rings preview', () => {
+  it('the result shows the sample ring on a finger with "Wearing" and a fit meter', async () => {
+    load({ storeType: 'rings', enabled: true });
+    apiSend.mockImplementation((url, method, body) =>
+      Promise.resolve(url.endsWith('/preview') ? { size: '12', outOfRange: false, reasons: [{ area: 'fit', status: 'right' }] } : { settings: body.settings }));
+    render(<SizeFinderScreen shop={SHOP} />);
+    const frame = await screen.findByTestId('preview-frame');
+    await within(frame).findByText(/Best match/);
+    expect(frame.querySelector('.sfp-pvis.is-ring .sfp-ring')).toHaveAttribute('data-kind', 'solitaire');
+    expect(frame.querySelector('.sfp-wearing')).toHaveTextContent('Wearing 12');
+    expect(frame.querySelector('.sfp-toe')).toHaveTextContent('Exact fit — comfortable');
+  });
+});

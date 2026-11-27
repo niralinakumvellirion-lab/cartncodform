@@ -576,6 +576,12 @@ describe('ccf-size.js — measure stores', () => {
     await flush(); await flush(); await flush();
     expect(recommendBodies.at(-1).value).toBe(51.8); // π × 16.5
     expect(q('.ccf-sf-me').textContent).toBe('Ring 16.5 mm');
+    // The ring is worn on a finger, filled with the product photo, with a fit meter (52 − 51.8 = 0.2 mm).
+    expect(q('.ccf-sf-pvis.is-ring .ccf-sf-ring').getAttribute('data-kind')).toBe('solitaire');
+    expect(q('.ccf-sf-ring pattern image').getAttribute('href')).toBe('https://cdn.shopify.com/s.jpg');
+    expect(q('.ccf-sf-pvis .ccf-sf-wearing').textContent).toBe('Wearing 12');
+    expect(q('.ccf-sf-toetext').textContent).toBe('0.2 mm room — comfortable');
+    expect(q('.ccf-sf-pvis').getAttribute('aria-label')).toBe('Canvas Sneakers in size 12 on your finger');
   });
 
   test('measure + remember: saved on this device for next time (value, way of measuring, unit)', async () => {
@@ -736,5 +742,26 @@ describe('ccf-size.js — shoes worn in a shoe shape', () => {
     expect(toe(1.6)).toMatchObject({ zone: 'roomy', text: '1.6 cm toe room — roomy' });
     expect(toe(0.5).pos).toBe(50);
     expect(toe(9).pos).toBe(96);
+  });
+});
+
+describe('ccf-size.js — rings worn on a finger', () => {
+  test('ring style from title / type / tags; unknown → solitaire', async () => {
+    await load();
+    const kind = window.__ccfSizeFinder.ringKind;
+    expect(kind('Classic Gold Wedding Band', '', '')).toBe('band');
+    expect(kind('Kundan Cocktail Ring', '', '')).toBe('cocktail');
+    expect(kind('Diamond Engagement Ring', '', '')).toBe('solitaire');
+    expect(kind('Silver Toe Ring', '', '')).toBe('band');
+    expect(kind('Something', '', '')).toBe('solitaire');
+  });
+
+  test('ring room: tight / comfortable / may slip', async () => {
+    await load();
+    const room = window.__ccfSizeFinder.ringRoom;
+    expect(room(-0.5)).toMatchObject({ zone: 'tight', text: '0.5 mm smaller than your finger — tight' });
+    expect(room(0)).toMatchObject({ zone: 'right', text: 'Exact fit — comfortable' });
+    expect(room(1.2)).toMatchObject({ zone: 'right', text: '1.2 mm room — comfortable' });
+    expect(room(2.4)).toMatchObject({ zone: 'roomy', text: '2.4 mm extra — may slip' });
   });
 });

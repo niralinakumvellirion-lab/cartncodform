@@ -274,6 +274,8 @@
       '.ccf-sf-pvis.is-shoe{flex-direction:column;justify-content:center;gap:10px;padding:46px 12px 44px}',
       '.ccf-sf-pvis .ccf-sf-shoe{width:100%;max-width:250px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
       '.ccf-sf-toe{width:100%;max-width:220px}',
+      '.ccf-sf-pvis.is-ring{flex-direction:column;justify-content:center;gap:8px;padding:40px 12px 44px}',
+      '.ccf-sf-pvis .ccf-sf-ring{width:100%;max-width:150px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
       '.ccf-sf-toebar{position:relative;display:flex;height:6px;border-radius:6px;overflow:visible;gap:2px}',
       '.ccf-sf-toezone{flex:1;border-radius:4px;opacity:.35}',
       '.ccf-sf-toezone.is-tight{background:#F87171}.ccf-sf-toezone.is-right{background:#22C55E}.ccf-sf-toezone.is-roomy{background:#F59E0B}',
@@ -593,6 +595,103 @@
     return { pos: pos, zone: 'roomy', text: v + ' cm toe room — roomy' };
   }
 
+  // ── A ring worn on a finger (ring stores) ──
+  // viewBox 160×170: a finger, the band's back half behind it and front half over it, and the setting on
+  // top. Band and stone are filled with the product photo (centre crop) with a metal shine and sparkle.
+  var RING_WORDS = [
+    ['cocktail', ['cocktail', 'statement', 'kundan', 'polki', 'halo', 'cluster', 'antique', 'temple']],
+    ['band', ['band', 'bands', 'wedding', 'couple', 'plain', 'eternity', 'toe', 'spinner', 'stackable', 'mens', 'men']],
+    ['solitaire', ['solitaire', 'engagement', 'diamond', 'stone', 'gem', 'gemstone', 'zircon', 'cz', 'moissanite', 'ruby', 'emerald', 'sapphire']],
+  ];
+  function ringKind(title, type, tags) {
+    var t = ' ' + [title, type, tags].join(' ').toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
+    for (var i = 0; i < RING_WORDS.length; i++) {
+      for (var j = 0; j < RING_WORDS[i][1].length; j++) {
+        if (t.indexOf(' ' + RING_WORDS[i][1][j] + ' ') !== -1) return RING_WORDS[i][0];
+      }
+    }
+    return 'solitaire';
+  }
+  // ring = { kind, image, fit } — fit: −2…2 steps from the recommended size (a size bigger / smaller).
+  function ringSvg(ring) {
+    var n = Math.floor(Math.random() * 1e6);
+    var fab = 'ccfsfrfab' + n, shine = 'ccfsfrsh' + n, gem = 'ccfsfrgem' + n, skin = 'ccfsfrskin' + n;
+    var f = Math.max(-2, Math.min(2, ring.fit || 0));
+    var k = 1 + 0.04 * f; // ring size relative to the finger
+    var cx = 80, cy = 96, rx = 31 * k, ry = 9 * k, w = 6;
+    var arc = function (top) {
+      var sweepOut = top ? 1 : 0, sweepIn = top ? 0 : 1;
+      return 'M' + (cx - rx) + ' ' + cy + 'A' + rx + ' ' + ry + ' 0 0 ' + sweepOut + ' ' + (cx + rx) + ' ' + cy +
+        'L' + (cx + rx - w) + ' ' + cy + 'A' + (rx - w) + ' ' + (ry - 2.6) + ' 0 0 ' + sweepIn + ' ' + (cx - rx + w) + ' ' + cy + 'Z';
+    };
+    var out = '<svg class="ccf-sf-ring" data-kind="' + ring.kind + '" viewBox="0 0 160 170" aria-hidden="true">' +
+      '<defs>' +
+      '<pattern id="' + fab + '" patternContentUnits="objectBoundingBox" width="1" height="1">' +
+        '<rect width="1" height="1" fill="#D4AF6A"/>' +
+        (ring.image ? '<image href="' + attr(ring.image) + '" x="-1" y="-1" width="3" height="3" preserveAspectRatio="xMidYMid slice"/>' : '') +
+      '</pattern>' +
+      '<linearGradient id="' + shine + '" x1="0" y1="0" x2="1" y2="0">' +
+        '<stop offset="0" stop-color="#000" stop-opacity=".28"/><stop offset=".3" stop-color="#fff" stop-opacity=".55"/>' +
+        '<stop offset=".45" stop-color="#fff" stop-opacity=".05"/><stop offset=".7" stop-color="#fff" stop-opacity=".35"/>' +
+        '<stop offset="1" stop-color="#000" stop-opacity=".3"/></linearGradient>' +
+      '<radialGradient id="' + gem + '" cx=".38" cy=".32" r=".7"><stop offset="0" stop-color="#fff" stop-opacity=".85"/>' +
+        '<stop offset=".35" stop-color="#fff" stop-opacity=".15"/><stop offset="1" stop-color="#000" stop-opacity=".25"/></radialGradient>' +
+      '<linearGradient id="' + skin + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#E3CBB2"/>' +
+        '<stop offset=".45" stop-color="#F4E6D7"/><stop offset="1" stop-color="#DCC1A6"/></linearGradient>' +
+      '</defs>' +
+      // band behind the finger
+      '<path d="' + arc(true) + '" fill="url(#' + fab + ')"/><path d="' + arc(true) + '" fill="#000" fill-opacity=".25"/>' +
+      // finger with nail and knuckle creases
+      '<path d="M58 170V34C58 18 68 8 80 8S102 18 102 34V170Z" fill="url(#' + skin + ')" stroke="#C9AE93" stroke-width="1"/>' +
+      '<path d="M69 30C69 20 74 15 80 15S91 20 91 30V40C91 44 87 46 80 46S69 44 69 40Z" fill="#F7EDE3" stroke="#D9C2AA" stroke-width=".9"/>' +
+      '<path d="M70 64C76 67 84 67 90 64M72 70C77 72 83 72 88 70M70 136C76 139 84 139 90 136" fill="none" stroke="#C9AE93" stroke-width=".9" stroke-linecap="round"/>' +
+      // band over the finger
+      '<path d="' + arc(false) + '" fill="url(#' + fab + ')"/><path d="' + arc(false) + '" fill="url(#' + shine + ')"/>' +
+      '<path d="' + arc(false) + '" fill="none" stroke="#000" stroke-opacity=".3" stroke-width=".8"/>';
+    var gy = cy + ry - 3; // the setting sits on the front of the band
+    if (ring.kind === 'solitaire') {
+      out += '<path d="M73 ' + (gy - 2) + 'L76 ' + (gy - 12) + 'M87 ' + (gy - 2) + 'L84 ' + (gy - 12) + '" stroke="#8C7A5B" stroke-width="1.6" stroke-linecap="round"/>' +
+        '<circle cx="80" cy="' + (gy - 10) + '" r="8.5" fill="url(#' + fab + ')" stroke="#000" stroke-opacity=".3" stroke-width=".8"/>' +
+        '<circle cx="80" cy="' + (gy - 10) + '" r="8.5" fill="url(#' + gem + ')"/>' +
+        '<path d="M80 ' + (gy - 18.5) + 'L80 ' + (gy - 1.5) + 'M71.5 ' + (gy - 10) + 'H88.5M74 ' + (gy - 16) + 'L86 ' + (gy - 4) + 'M86 ' + (gy - 16) + 'L74 ' + (gy - 4) + '" stroke="#fff" stroke-opacity=".45" stroke-width=".6"/>' +
+        '<path d="M77 ' + (gy - 15) + 'l1.2 2.4 2.4 1.2-2.4 1.2-1.2 2.4-1.2-2.4-2.4-1.2 2.4-1.2z" fill="#fff"/>';
+    } else if (ring.kind === 'cocktail') {
+      for (var i = 0; i < 12; i++) {
+        var a = (Math.PI * 2 * i) / 12;
+        out += '<circle cx="' + (80 + 15 * Math.cos(a)).toFixed(1) + '" cy="' + (gy - 12 + 11 * Math.sin(a)).toFixed(1) + '" r="2.3" fill="#fff" stroke="#8C7A5B" stroke-width=".6"/>';
+      }
+      out += '<ellipse cx="80" cy="' + (gy - 12) + '" rx="12" ry="9" fill="url(#' + fab + ')" stroke="#000" stroke-opacity=".3" stroke-width=".8"/>' +
+        '<ellipse cx="80" cy="' + (gy - 12) + '" rx="12" ry="9" fill="url(#' + gem + ')"/>' +
+        '<path d="M76 ' + (gy - 17) + 'l1.4 2.6 2.6 1.4-2.6 1.4-1.4 2.6-1.4-2.6-2.6-1.4 2.6-1.4z" fill="#fff"/>';
+    } else {
+      out += '<path d="M' + (cx - rx + 9) + ' ' + (cy + 4) + 'Q80 ' + (cy + ry + 1) + ' ' + (cx + rx - 9) + ' ' + (cy + 4) + '" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="1"/>';
+    }
+    return out + '</svg>';
+  }
+  // Room = the ring's size around − the shopper's finger (mm).
+  function ringRoom(mm) {
+    var v = Math.round(mm * 10) / 10;
+    var pos = Math.max(4, Math.min(96, ((v + 1.5) / 4.5) * 100)); // −1.5 mm … +3 mm across the bar
+    if (v < 0) return { pos: pos, zone: 'tight', text: Math.abs(v) + ' mm smaller than your finger — tight' };
+    if (v === 0) return { pos: pos, zone: 'right', text: 'Exact fit — comfortable' };
+    if (v <= 1.5) return { pos: pos, zone: 'right', text: v + ' mm room — comfortable' };
+    return { pos: pos, zone: 'roomy', text: v + ' mm extra — may slip' };
+  }
+  // A fit meter: tight / right / roomy zones, a marker and one line of text.
+  function fitMeter(fit) {
+    var meter = el('div', 'ccf-sf-toe is-' + fit.zone);
+    var bar = el('div', 'ccf-sf-toebar');
+    bar.appendChild(el('span', 'ccf-sf-toezone is-tight'));
+    bar.appendChild(el('span', 'ccf-sf-toezone is-right'));
+    bar.appendChild(el('span', 'ccf-sf-toezone is-roomy'));
+    var mark = el('i', 'ccf-sf-toemark');
+    mark.style.left = fit.pos + '%';
+    bar.appendChild(mark);
+    meter.appendChild(bar);
+    meter.appendChild(el('p', 'ccf-sf-toetext', fit.text));
+    return meter;
+  }
+
   // A soft, filled mannequin. Wider with body-mass index and the chosen build, taller with height.
   // With dress = { kind, image, fit } it wears that garment.
   function figureSvg(heightCm, weightKg, build, size, dress) {
@@ -623,6 +722,7 @@
       image: root.getAttribute('data-product-image') || '',
     };
     if (product.image.indexOf('//') === 0) product.image = 'https:' + product.image;
+    product.ring = ringKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.shoe = shoeKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.garment = garmentKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     var accent = /^#[0-9A-Fa-f]{6}$/.test(settings.accentColor || '') ? settings.accentColor : '#111827';
@@ -1469,23 +1569,30 @@
           sw.appendChild(document.createTextNode('Wearing ' + pick));
           av.appendChild(sw);
           var pickRow = M.chart.filter(function (c) { return String(c.size) === String(pick); })[0];
-          if (pickRow && state.mode !== 'alt') {
-            var tr = toeRoom(pickRow.value - measuredValue());
-            var meter = el('div', 'ccf-sf-toe is-' + tr.zone);
-            var bar = el('div', 'ccf-sf-toebar');
-            bar.appendChild(el('span', 'ccf-sf-toezone is-tight'));
-            bar.appendChild(el('span', 'ccf-sf-toezone is-right'));
-            bar.appendChild(el('span', 'ccf-sf-toezone is-roomy'));
-            var mark = el('i', 'ccf-sf-toemark');
-            mark.style.left = tr.pos + '%';
-            bar.appendChild(mark);
-            meter.appendChild(bar);
-            meter.appendChild(el('p', 'ccf-sf-toetext', tr.text));
-            av.appendChild(meter);
-          }
+          if (pickRow && state.mode !== 'alt') av.appendChild(fitMeter(toeRoom(pickRow.value - measuredValue())));
           var sme = el('div', 'ccf-sf-me');
           sme.appendChild(el('span', null, shortMeasure()));
           av.appendChild(sme);
+        } else if (M && settings.storeType === 'rings') {
+          // The ring worn on a finger, with a "Wearing 12" chip and a fit meter.
+          var ringSizes = chartSizes();
+          var ringAt = ringSizes.indexOf(String(r.size));
+          av = el('div', 'ccf-sf-pvis is-ring');
+          av.setAttribute('role', 'img');
+          av.setAttribute('aria-label', (product.title || 'This ring') + ' in size ' + pick + ' on your finger');
+          av.insertAdjacentHTML('beforeend', ringSvg({
+            kind: product.ring, image: product.image,
+            fit: ringAt === -1 ? 0 : ringSizes.indexOf(String(pick)) - ringAt,
+          }));
+          var rw = el('span', 'ccf-sf-wearing');
+          rw.appendChild(el('span', 'ccf-sf-wdot'));
+          rw.appendChild(document.createTextNode('Wearing ' + pick));
+          av.appendChild(rw);
+          var ringRow = M.chart.filter(function (c) { return String(c.size) === String(pick); })[0];
+          if (ringRow) av.appendChild(fitMeter(ringRoom(ringRow.value - measuredValue())));
+          var rme = el('div', 'ccf-sf-me');
+          rme.appendChild(el('span', null, shortMeasure()));
+          av.appendChild(rme);
         } else if (M) {
           av = el('div', 'ccf-sf-pvis');
           if (product.image) {
@@ -1682,5 +1789,5 @@
   document.addEventListener('shopify:section:load', start);
 
   // Exposed for tests
-  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind, shoeKind: shoeKind, toeRoom: toeRoom };
+  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind, shoeKind: shoeKind, toeRoom: toeRoom, ringKind: ringKind, ringRoom: ringRoom };
 })();
