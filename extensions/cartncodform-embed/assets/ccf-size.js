@@ -901,8 +901,11 @@
   }
 
   // A soft, filled mannequin. Wider with body-mass index and the chosen build, taller with height.
-  // With dress = { kind, image, fit } it wears that garment.
-  function figureSvg(heightCm, weightKg, build, size, dress) {
+  // With dress = { kind, image, fit } it wears that garment. gender 'women' = narrower shoulders, a waist,
+  // fuller hips and a hair bun; anything else = the broader-shouldered figure.
+  var WOMAN_BODY = 'M21 31c3-2.6 7-3.5 11-3.5s8 .9 11 3.5c2.6 2 3.6 4.8 4 8.2l2.3 33c.2 3-1.4 5-3.3 5s-3.1-1.6-3.4-4L43 47c-.4 5-2 10-2 15 0 6 4.5 13 4.5 22l-2.2 69c-.1 3-2 4.5-4.2 4.5s-4-1.6-4-4.4L33.5 96h-3L29 153.1c0 2.8-1.8 4.4-4 4.4s-4.1-1.5-4.2-4.5l-2.2-69c0-9 4.5-16 4.5-22 0-5-1.6-10-2-15l-1.6 26c-.3 2.4-1.6 4-3.4 4s-3.5-2-3.3-5l2.3-33c.4-3.4 1.4-6.2 4-8.2z';
+  function figureSvg(heightCm, weightKg, build, size, dress, gender) {
+    var woman = gender === 'women';
     var bmi = weightKg / Math.pow(heightCm / 100, 2);
     var b = BUILDS.filter(function (x) { return x.value === build; })[0];
     var sx = Math.max(0.8, Math.min(1.4, (bmi / 22) * (b ? b.sx : 1)));
@@ -910,12 +913,13 @@
     var h = size || 160;
     var w = Math.round(h * 0.42);
     var id = 'ccfsfg' + Math.floor(Math.random() * 1e6);
-    return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 64 160" aria-hidden="true" style="transform:scale(' + sx.toFixed(3) + ',' + sy.toFixed(3) + ');transform-origin:50% 100%">' +
+    return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 64 160" aria-hidden="true" data-gender="' + (woman ? 'women' : 'men') + '" style="transform:scale(' + sx.toFixed(3) + ',' + sy.toFixed(3) + ');transform-origin:50% 100%">' +
       '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#B8B8B6"/><stop offset=".5" stop-color="#D9D9D7"/><stop offset="1" stop-color="#A8A8A6"/></linearGradient></defs>' +
       '<g fill="url(#' + id + ')">' +
-      '<ellipse cx="32" cy="13" rx="9" ry="10.5"/>' +
-      '<path d="M28 23h8v5h-8z"/>' +
-      '<path d="M18 30c4-3 9-3.5 14-3.5s10 .5 14 3.5c3 2 4 5 4.5 9l2.5 34c.2 3-1.5 5-3.5 5s-3.3-1.6-3.6-4L46 46l-1 30c0 6 .5 10 .5 14l-2 63c-.1 3-2 4.5-4.3 4.5s-4-1.6-4-4.4L33.5 94h-3L29 153c0 2.8-1.8 4.4-4 4.4s-4.2-1.5-4.3-4.5l-2-63c0-4 .5-8 .5-14l-1-30-2.4 28c-.3 2.4-1.6 4-3.6 4s-3.7-2-3.5-5l2.5-34c.5-4 1.5-7 4.5-9z"/>' +
+      (woman
+        ? '<circle cx="32" cy="2.8" r="4.3"/><ellipse cx="32" cy="13.4" rx="8.4" ry="10"/><path d="M29 23h6v5h-6z"/><path d="' + WOMAN_BODY + '"/>'
+        : '<ellipse cx="32" cy="13" rx="9" ry="10.5"/><path d="M28 23h8v5h-8z"/>' +
+      '<path d="M18 30c4-3 9-3.5 14-3.5s10 .5 14 3.5c3 2 4 5 4.5 9l2.5 34c.2 3-1.5 5-3.5 5s-3.3-1.6-3.6-4L46 46l-1 30c0 6 .5 10 .5 14l-2 63c-.1 3-2 4.5-4.3 4.5s-4-1.6-4-4.4L33.5 94h-3L29 153c0 2.8-1.8 4.4-4 4.4s-4.2-1.5-4.3-4.5l-2-63c0-4 .5-8 .5-14l-1-30-2.4 28c-.3 2.4-1.6 4-3.6 4s-3.7-2-3.5-5l2.5-34c.5-4 1.5-7 4.5-9z"/>') +
       '</g>' + (dress ? garmentSvg(dress) : '') + '</svg>';
   }
 
@@ -1222,7 +1226,7 @@
 
     var figureBox = null;
     function redrawFigure() {
-      if (figureBox) figureBox.innerHTML = figureSvg(state.heightCm, state.weightKg, state.step >= 3 ? state.shape : 'average', 96);
+      if (figureBox) figureBox.innerHTML = figureSvg(state.heightCm, state.weightKg, state.step >= 3 ? state.shape : 'average', 96, null, state.gender);
     }
 
     // Live estimate on step 2 (same backend maths, balanced build + regular fit, never saved).
@@ -1639,7 +1643,7 @@
         body.appendChild(el('h2', 'ccf-sf-title', T('step1Title')));
         body.appendChild(el('p', 'ccf-sf-lede', T('step1Text')));
         var fig1 = el('div', 'ccf-sf-figure');
-        fig1.innerHTML = figureSvg(state.heightCm, state.weightKg, 'average', 150);
+        fig1.innerHTML = figureSvg(state.heightCm, state.weightKg, 'average', 150, null, state.gender);
         body.appendChild(fig1);
         var rows = el('div', 'ccf-sf-rows');
         rows.setAttribute('role', 'group');
@@ -1702,7 +1706,7 @@
           var b = button('ccf-sf-build', null, function () { state.shape = bd.value; draw(); }, bd.label);
           b.setAttribute('aria-pressed', bd.value === state.shape ? 'true' : 'false');
           var f = el('span', 'ccf-sf-bfig');
-          f.innerHTML = figureSvg(170, 22 * 2.89 * bd.sx, 'average', 46);
+          f.innerHTML = figureSvg(170, 22 * 2.89 * bd.sx, 'average', 46, null, state.gender);
           b.appendChild(f);
           var c = el('span', 'ccf-sf-bcopy');
           c.appendChild(el('b', null, bd.label));
@@ -1741,7 +1745,7 @@
         c4.appendChild(el('h2', 'ccf-sf-title', T('creatingTitle')));
         var stage = el('div', 'ccf-sf-stage');
         stage.appendChild(el('span', 'ccf-sf-pedestal'));
-        stage.insertAdjacentHTML('beforeend', figureSvg(state.heightCm, state.weightKg, state.shape, 200));
+        stage.insertAdjacentHTML('beforeend', figureSvg(state.heightCm, state.weightKg, state.shape, 200, null, state.gender));
         c4.appendChild(stage);
         var bar = el('div', 'ccf-sf-bar');
         var fill = el('span');
@@ -1867,7 +1871,7 @@
         var sizesNow = chartSizes();
         var fitStep = sizesNow.indexOf(String(pick)) - sizesNow.indexOf(String(r.size));
         av.innerHTML = '<span class="ccf-sf-floor"></span>' + figureSvg(state.heightCm, state.weightKg, state.shape, 230,
-          { kind: product.garment, image: product.image, fit: sizesNow.indexOf(String(r.size)) === -1 ? 0 : fitStep });
+          { kind: product.garment, image: product.image, fit: sizesNow.indexOf(String(r.size)) === -1 ? 0 : fitStep }, state.gender);
         av.setAttribute('role', 'img');
         av.setAttribute('aria-label', 'Your avatar wearing ' + (product.title || 'this product') + ' in size ' + pick);
         var wearing = el('span', 'ccf-sf-wearing');

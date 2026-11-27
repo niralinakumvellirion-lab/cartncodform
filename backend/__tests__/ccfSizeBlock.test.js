@@ -339,6 +339,7 @@ describe('ccf-size.js — "Try it on me" steps', () => {
     expect(q('img.ccf-sf-wear')).toBeNull(); // no flat photo any more
     const g = q('.ccf-sf-avatar .ccf-sf-garment');
     expect(g.getAttribute('data-kind')).toBe('kurta'); // "Cotton Kurta"
+    expect(q('.ccf-sf-avatar svg').getAttribute('data-gender')).toBe('women'); // the woman figure
     expect(q('.ccf-sf-avatar pattern image').getAttribute('href')).toBe('https://cdn.shopify.com/k.jpg');
     expect(g.getAttribute('transform')).toContain('scale(1.000 1.000)');
     expect(q('.ccf-sf-wearing').textContent).toBe('Wearing M');

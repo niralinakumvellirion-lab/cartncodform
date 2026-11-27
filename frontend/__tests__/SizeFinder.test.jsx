@@ -2,7 +2,7 @@
  * Admin "Find my size" screen (jsdom + React Testing Library).
  */
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { apiGet, apiSend } from '../../../lib/api';
 import SizeFinderScreen, { toUnit, fromUnit } from '../app/admin/screens/SizeFinder';
 
@@ -151,7 +151,7 @@ describe('live preview (view only)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Man (1)' }));
     await waitFor(() => expect(previewCalls().at(-1)[2].answers).toMatchObject({ gender: 'men', heightCm: 175, weightKg: 72 }));
     expect(previewCalls().at(-1)[2].chart).toEqual(SETTINGS.charts.men);
-    expect(screen.getByText(/Sample shopper: Men/)).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Sample shopper' })).getByRole('button', { name: 'Man' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('shows the backend error in the result', async () => {
@@ -480,5 +480,29 @@ describe('dressed avatar in the preview', () => {
     expect(frame.querySelector('.sfp-avatar .sfp-garment')).toHaveAttribute('data-kind', 'kurta');
     expect(frame.querySelector('.sfp-wearing')).toHaveTextContent('Wearing M');
     expect(container.querySelector('.sfp-wear')).toBeNull();
+  });
+});
+
+describe('preview: sample shopper and device frames', () => {
+  it('Woman / Man switch changes the sample shopper, the backend sample and the mannequin', async () => {
+    const { container } = render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByLabelText('Recommended size');
+    const group = screen.getByRole('group', { name: 'Sample shopper' });
+    expect(within(group).getByRole('button', { name: 'Woman' })).toHaveAttribute('aria-pressed', 'true');
+    expect(container.querySelector('.sfp-avatar svg')).toHaveAttribute('data-gender', 'women');
+    fireEvent.click(within(group).getByRole('button', { name: 'Man' }));
+    await waitFor(() => expect(apiSend.mock.calls.filter(([u]) => u.endsWith('/preview')).at(-1)[2].answers)
+      .toMatchObject({ gender: 'men', heightCm: 175, weightKg: 72 }));
+    expect(container.querySelector('.sfp-avatar svg')).toHaveAttribute('data-gender', 'men');
+    expect(container.querySelector('.sfp-shopperstats')).toHaveTextContent('175 cm72 kgBalanced');
+  });
+
+  it('desktop shows a browser window with the store address; mobile a phone', async () => {
+    const { container } = render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByLabelText('Recommended size');
+    expect(container.querySelector('.sfp-device.is-desktop .sfp-url')).toHaveTextContent('yourstore.com/products/cotton-kurta');
+    fireEvent.click(screen.getByRole('button', { name: 'Mobile' }));
+    expect(container.querySelector('.sfp-device.is-mobile .sfp-phonebar')).not.toBeNull();
+    expect(screen.getByTestId('preview-frame')).toHaveAttribute('inert');
   });
 });

@@ -149,6 +149,31 @@ function SampleBaby() {
   );
 }
 
+// The address shown in the preview's browser bar.
+const PRODUCT_PATH = {
+  clothing: 'products/cotton-kurta', baby: 'products/cotton-baby-romper', shoes: 'products/canvas-sneakers',
+  rings: 'products/solitaire-silver-ring', bangles: 'products/glass-bangle-set',
+};
+// Browser bar (desktop) or phone status bar (mobile) on top of a preview.
+function DeviceBar({ device, path }) {
+  if (device === 'mobile') {
+    return (
+      <div className="sfp-phonebar" aria-hidden="true">
+        <span>9:41</span><i className="sfp-notch" /><span className="sfp-phoneicons"><b /><b /><b /></span>
+      </div>
+    );
+  }
+  return (
+    <div className="sfp-browserbar" aria-hidden="true">
+      <span className="sfp-dots"><i /><i /><i /></span>
+      <span className="sfp-url">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+        yourstore.com/{path}
+      </span>
+    </div>
+  );
+}
+
 // Sample bangle set on a wrist in the bangles preview (on the store the bangles are the product photo).
 function SampleBangles() {
   const band = (cy, top) => (top
@@ -223,10 +248,13 @@ function SampleShoe() {
   );
 }
 
-function Mannequin({ heightCm, weightKg, build = 'average', h = 120, dressed = false }) {
+// Same figures as ccf-size.js figureSvg: women narrower shoulders, a waist, fuller hips and a hair bun.
+const WOMAN_BODY = 'M21 31c3-2.6 7-3.5 11-3.5s8 .9 11 3.5c2.6 2 3.6 4.8 4 8.2l2.3 33c.2 3-1.4 5-3.3 5s-3.1-1.6-3.4-4L43 47c-.4 5-2 10-2 15 0 6 4.5 13 4.5 22l-2.2 69c-.1 3-2 4.5-4.2 4.5s-4-1.6-4-4.4L33.5 96h-3L29 153.1c0 2.8-1.8 4.4-4 4.4s-4.1-1.5-4.2-4.5l-2.2-69c0-9 4.5-16 4.5-22 0-5-1.6-10-2-15l-1.6 26c-.3 2.4-1.6 4-3.4 4s-3.5-2-3.3-5l2.3-33c.4-3.4 1.4-6.2 4-8.2z';
+function Mannequin({ heightCm, weightKg, build = 'average', h = 120, dressed = false, gender = 'men' }) {
+  const woman = gender === 'women';
   const s = figureScale(heightCm, weightKg, build);
   return (
-    <svg width={Math.round(h * 0.42)} height={h} viewBox="0 0 64 160" aria-hidden="true"
+    <svg width={Math.round(h * 0.42)} height={h} viewBox="0 0 64 160" aria-hidden="true" data-gender={woman ? 'women' : 'men'}
       style={{ transform: `scale(${s.x.toFixed(3)},${s.y.toFixed(3)})`, transformOrigin: '50% 100%' }}>
       <defs>
         <linearGradient id={`sfpg${h}`} x1="0" y1="0" x2="1" y2="0">
@@ -234,9 +262,18 @@ function Mannequin({ heightCm, weightKg, build = 'average', h = 120, dressed = f
         </linearGradient>
       </defs>
       <g fill={`url(#sfpg${h})`}>
+        {woman ? (
+          <>
+            <circle cx="32" cy="2.8" r="4.3" /><ellipse cx="32" cy="13.4" rx="8.4" ry="10" />
+            <path d="M29 23h6v5h-6z" /><path d={WOMAN_BODY} />
+          </>
+        ) : (
+        <>
         <ellipse cx="32" cy="13" rx="9" ry="10.5" />
         <path d="M28 23h8v5h-8z" />
         <path d="M18 30c4-3 9-3.5 14-3.5s10 .5 14 3.5c3 2 4 5 4.5 9l2.5 34c.2 3-1.5 5-3.5 5s-3.3-1.6-3.6-4L46 46l-1 30c0 6 .5 10 .5 14l-2 63c-.1 3-2 4.5-4.3 4.5s-4-1.6-4-4.4L33.5 94h-3L29 153c0 2.8-1.8 4.4-4 4.4s-4.2-1.5-4.3-4.5l-2-63c0-4 .5-8 .5-14l-1-30-2.4 28c-.3 2.4-1.6 4-3.6 4s-3.7-2-3.5-5l2.5-34c.5-4 1.5-7 4.5-9z" />
+        </>
+        )}
       </g>
       {dressed && <Garment id={`sfpw${h}`} />}
     </svg>
@@ -313,7 +350,10 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const isMeasure = !!measure;
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
-  const gender = genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
+  const [pickGender, setPickGender] = useState(null);
+  useEffect(() => { setPickGender(null); }, [editorGender]);
+  const gender = genders.includes(pickGender) ? pickGender
+    : genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
   const [device, setDevice] = useState('desktop');
   const [ownView, setOwnView] = useState(5);
   const rawView = viewProp || ownView;
@@ -606,7 +646,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {stepper(1)}
             <p className={`sfp-title${hl('step1Title')}`}>{t('step1Title')}</p>
             <p className={`sfp-lede${hl('step1Text')}`}>{t('step1Text')}</p>
-            <div className="sfp-figure"><Mannequin heightCm={170} weightKg={64} h={110} /></div>
+            <div className="sfp-figure"><Mannequin gender={gender} heightCm={170} weightKg={64} h={110} /></div>
             <div className="sfp-rows">
               {['men', 'women'].filter((g) => genders.includes(g)).map((g) => (
                 <div key={g} className={`sfp-row${g === gender ? ' is-on' : ''}${hl(g === 'men' ? 'menLabel' : 'womenLabel', 'chart')}`}>
@@ -624,7 +664,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {stepper(2)}
             <p className={`sfp-title${hl('step2Title')}`}>{t('step2Title')}</p>
             <p className={`sfp-lede${hl('step2Text')}`}>{t('step2Text')}</p>
-            <div className="sfp-figure is-small"><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={70} /></div>
+            <div className="sfp-figure is-small"><Mannequin gender={gender} heightCm={sample.heightCm} weightKg={sample.weightKg} h={70} /></div>
             {[['Height', heightLabel(sample.heightCm, hUnit), heightPct, hUnit === 'ft' ? ['4′ 7″', '6′ 11″'] : ['140 cm', '210 cm'], [['cm', 'cm'], ['ft', 'ft']], hUnit],
               ['Weight', weightLabel(sample.weightKg, wUnit), weightPct, wUnit === 'lb' ? ['88 lb', '309 lb'] : ['40 kg', '140 kg'], [['kg', 'kg'], ['lb', 'lb']], wUnit]].map(([name, val, pct, mm, units, cur]) => (
               <div key={name} className="sfp-field">
@@ -650,7 +690,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             <div className="sfp-builds">
               {BUILDS.map(([v, l, hint, sx]) => (
                 <div key={v} className={`sfp-build${v === 'average' ? ' on' : ''}`}>
-                  <span className="sfp-bfig"><Mannequin heightCm={170} weightKg={22 * 2.89 * sx} h={34} /></span>
+                  <span className="sfp-bfig"><Mannequin gender={gender} heightCm={170} weightKg={22 * 2.89 * sx} h={34} /></span>
                   <span className="sfp-bcopy"><b>{l}</b><small>{hint}</small></span>
                   {v === 'average' && <span className="sfp-bcheck"><I s={9} w={2.6}>{CHECK}</I></span>}
                 </div>
@@ -669,7 +709,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
           <div className="sfp-creating">
             <div className="sfp-shirt"><I s={22} w={1.6}><path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z" /></I></div>
             <p className={`sfp-title${hl('creatingTitle')}`}>{t('creatingTitle')}</p>
-            <div className="sfp-stage2"><span className="sfp-pedestal" /><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={140} /></div>
+            <div className="sfp-stage2"><span className="sfp-pedestal" /><Mannequin gender={gender} heightCm={sample.heightCm} weightKg={sample.weightKg} h={140} /></div>
             <div className="sfp-bar"><span /></div>
             <p className="sfp-status">Generating…</p>
           </div>
@@ -683,7 +723,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {!error && result && (
               <>
                 <div className="sfp-result">
-                  <div className="sfp-avatar"><span className="sfp-floor" /><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={150} dressed /><span className="sfp-wearing"><i />Wearing {result.size}</span><span className="sfp-me">{heightLabel(sample.heightCm, 'cm')} · {weightLabel(sample.weightKg, 'kg')}</span></div>
+                  <div className="sfp-avatar"><span className="sfp-floor" /><Mannequin gender={gender} heightCm={sample.heightCm} weightKg={sample.weightKg} h={150} dressed /><span className="sfp-wearing"><i />Wearing {result.size}</span><span className="sfp-me">{heightLabel(sample.heightCm, 'cm')} · {weightLabel(sample.weightKg, 'kg')}</span></div>
                   <div>
                     <div className="sfp-prod"><span className="sfp-thumb" /><span><b>Cotton Kurta</b><small>₹1,299</small></span></div>
                     <div className="sfp-hero">
@@ -744,7 +784,12 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
         <div className="sfp-block">
           <p className="sfp-blocktitle"><span>1</span>Button on the product page</p>
           {/* Display only: inert = no clicks, no keyboard focus inside the previews. */}
-          <div className="sfp-cardbox sfp-static" data-testid="preview-card" {...{ inert: '' }}>{card}</div>
+          <div className={`sfp-device is-${device}`} aria-hidden="true">
+            <DeviceBar device={device} path={PRODUCT_PATH[storeType] || PRODUCT_PATH.clothing} />
+            <div className="sfp-devbody is-page">
+              <div className="sfp-cardbox sfp-static" data-testid="preview-card" {...{ inert: '' }}>{card}</div>
+            </div>
+          </div>
         </div>
         )}
 
@@ -758,19 +803,42 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
               ))}
             </div>
           </div>
-          <div className="sfp-frame sfp-static" data-testid="preview-frame" {...{ inert: '' }}>
-            {sheet || <p className="sfp-warn">Add a size chart to see the size preview.</p>}
+          <div className={`sfp-device is-${device}`}>
+            <DeviceBar device={device} path={PRODUCT_PATH[storeType] || PRODUCT_PATH.clothing} />
+            <div className="sfp-devbody is-dim">
+              <div className="sfp-ghostpage" aria-hidden="true"><i /><span><b /><b /><b /><em /></span></div>
+              <div className="sfp-frame sfp-static" data-testid="preview-frame" {...{ inert: '' }}>
+                {sheet || <p className="sfp-warn">Add a size chart to see the size preview.</p>}
+              </div>
+            </div>
           </div>
         </div>
         )}
       </div>
-      <p className="sfp-sample">
-        {isMeasure
-          ? (baby
+      {!isMeasure && genders.length > 0 && (
+        <div className="sfp-shopper">
+          <span className="sfp-shopperlabel">Sample shopper</span>
+          {genders.length > 1 ? (
+            <span className="sfp-seg" role="group" aria-label="Sample shopper">
+              {['women', 'men'].filter((g) => genders.includes(g)).map((g) => (
+                <button key={g} type="button" aria-pressed={gender === g} onClick={() => setPickGender(g)}>
+                  {g === 'men' ? t('menLabel') : t('womenLabel')}
+                </button>
+              ))}
+            </span>
+          ) : <span className="sfp-chip">{gender === 'men' ? t('menLabel') : t('womenLabel')}</span>}
+          <span className="sfp-shopperstats">
+            <span>{heightLabel(sample.heightCm, hUnit)}</span><span>{weightLabel(sample.weightKg, wUnit)}</span><span>Balanced</span>
+          </span>
+        </div>
+      )}
+      {isMeasure && (
+        <p className="sfp-sample">
+          {baby
             ? <>Sample baby: {measureLabel(baby.length.start, 'cm')} long, {measureLabel(baby.weight.start, 'kg')}.</>
-            : <>Sample shopper: {measure.value.toLowerCase()} {measureLabel(measure.start, measure.unit)}.</>)
-          : <>Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, balanced build.</>}
-      </p>
+            : <>Sample shopper: {measure.value.toLowerCase()} {measureLabel(measure.start, measure.unit)}.</>}
+        </p>
+      )}
     </section>
   );
 }
@@ -789,14 +857,53 @@ const CSS = `
 .sfp-dev button,.sfp-views button{border:0;background:transparent;border-radius:6px;height:26px;padding:0 10px;font-size:12px;font-weight:550;color:#616161;cursor:pointer}
 .sfp-dev button[aria-pressed="true"],.sfp-views button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 0 rgba(26,26,26,.07),0 0 0 1px #E3E3E3}
 .sfp-both{background:none;border:0;padding:0;font-size:12px;font-weight:600;color:#303030;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
-.sfp-sample{font-size:12px;color:#616161;margin:10px 2px 0;font-weight:450}
+.sfp-sample{font-size:12px;color:#616161;margin:8px 2px 0;font-weight:450}
+.sfp-device{border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 0 0 1px #E3E3E3,0 12px 28px rgba(0,0,0,.08);margin:0 auto}
+.sfp-device.is-mobile{max-width:300px;border-radius:30px;padding:8px;background:#1F1F1F;box-shadow:0 18px 40px rgba(0,0,0,.22)}
+.sfp-device.is-mobile .sfp-devbody{border-radius:0 0 22px 22px}
+.sfp-device.is-mobile .sfp-frame{max-width:none;width:100%;margin:0;border-radius:18px 18px 0 0}
+.sfp-device.is-mobile .sfp-devbody{overflow:hidden}
+.sfp-result>*{min-width:0}
+.sfp-sizes,.sfp-hero,.sfp-prod{min-width:0}
+.sfp-size{min-width:0;overflow:hidden}
+.sfp-size small{overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.sfp-device.is-mobile .sfp-result{grid-template-columns:38% minmax(0,1fr)}
+.sfp-browserbar{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#F3F3F2;border-bottom:1px solid #E6E6E4}
+.sfp-dots{display:inline-flex;gap:5px}
+.sfp-dots i{width:8px;height:8px;border-radius:50%;background:#FF5F57}
+.sfp-dots i:nth-child(2){background:#FEBC2E}.sfp-dots i:nth-child(3){background:#28C840}
+.sfp-url{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;height:22px;border-radius:6px;background:#fff;box-shadow:0 0 0 1px #E3E3E3;font-size:10.5px;color:#616161;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sfp-phonebar{position:relative;display:flex;justify-content:space-between;align-items:center;padding:6px 18px 4px;background:#fff;border-radius:22px 22px 0 0;font-size:10px;font-weight:650;color:#111}
+.sfp-notch{position:absolute;left:50%;top:5px;width:70px;height:16px;margin-left:-35px;border-radius:10px;background:#1F1F1F}
+.sfp-phoneicons{display:inline-flex;gap:2px;align-items:flex-end}
+.sfp-phoneicons b{width:3px;background:#111;border-radius:1px}.sfp-phoneicons b:nth-child(1){height:4px}.sfp-phoneicons b:nth-child(2){height:6px}.sfp-phoneicons b:nth-child(3){height:8px}
+.sfp-devbody{position:relative;background:#fff}
+.sfp-devbody.is-page{padding:12px;background:linear-gradient(180deg,#FAFAF9,#fff)}
+.sfp-devbody.is-dim{padding:18px 14px;background:#F2F1EF;min-height:200px}
+.sfp-device.is-mobile .sfp-devbody.is-dim{padding:60px 0 0;display:flex;flex-direction:column;justify-content:flex-end}
+.sfp-ghostpage{position:absolute;inset:0;display:flex;gap:12px;padding:16px;opacity:.55;filter:blur(1.5px)}
+.sfp-ghostpage i{flex:1;border-radius:10px;background:#E4E2DE}
+.sfp-ghostpage span{flex:1;display:flex;flex-direction:column;gap:8px}
+.sfp-ghostpage b{height:10px;border-radius:5px;background:#E4E2DE}.sfp-ghostpage b:nth-child(2){width:60%}.sfp-ghostpage b:nth-child(3){width:40%}
+.sfp-ghostpage em{margin-top:auto;height:26px;border-radius:8px;background:#DAD8D3}
+.sfp-devbody.is-dim:after{content:"";position:absolute;inset:0;background:rgba(17,17,17,.28)}
+.sfp-devbody.is-dim .sfp-frame{position:relative;z-index:1}
+.sfp-device.is-mobile .sfp-ghostpage{flex-direction:column}
+.sfp-shopper{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 2px 0;padding:10px 12px;border-radius:10px;background:#F7F7F7}
+.sfp-shopperlabel{font-size:12px;font-weight:650;color:#303030}
+.sfp-seg{display:inline-flex;background:#E9E9E9;border-radius:8px;padding:2px}
+.sfp-seg button{border:0;background:transparent;border-radius:6px;height:24px;padding:0 10px;font-size:12px;font-weight:550;color:#616161;cursor:pointer;font-family:inherit}
+.sfp-seg button[aria-pressed="true"]{background:#fff;color:#303030;box-shadow:0 1px 0 rgba(26,26,26,.07),0 0 0 1px #E3E3E3}
+.sfp-chip{font-size:12px;font-weight:550;color:#303030;background:#fff;border-radius:6px;padding:3px 8px;box-shadow:0 0 0 1px #E3E3E3}
+.sfp-shopperstats{display:inline-flex;gap:6px;margin-left:auto}
+.sfp-shopperstats span{font-size:11.5px;color:#4A4A4A;background:#fff;border-radius:999px;padding:2px 8px;box-shadow:0 0 0 1px #E8E8E8}
 .sfp-stage{display:flex;flex-direction:column;gap:14px}
 .sfp-block{background:#F7F7F7;border-radius:10px;padding:14px}
 .sfp-blockhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
 .sfp-blocktitle{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:#303030;margin:0 0 10px}
 .sfp-blockhead .sfp-blocktitle{margin:0}
 .sfp-blocktitle span{display:none}
-.sfp-cardbox{background:#fff;border-radius:10px;padding:14px;max-width:440px;margin:0 auto}
+.sfp-cardbox{background:#fff;border-radius:10px;padding:14px;max-width:440px;margin:0 auto;box-shadow:0 0 0 1px #EFEFEF}
 .sfp-frame{max-width:380px;margin:0 auto;border-radius:20px;overflow:hidden;box-shadow:0 18px 40px rgba(0,0,0,.14);border:1px solid #E7E7E5;background:#fff}
 .sfp-stage.is-mobile .sfp-cardbox{max-width:340px}
 .sfp-stage.is-mobile .sfp-frame{max-width:330px;border-radius:20px 20px 0 0}
