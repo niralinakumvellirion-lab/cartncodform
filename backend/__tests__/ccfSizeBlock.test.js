@@ -71,11 +71,50 @@ const btn = (text) => Array.from(document.querySelectorAll('button'))
 
 afterAll(() => { delete global.fetch; });
 
-describe('ccf-size.js', () => {
-  test('shows the button when on and the product has a Size option', async () => {
-    await load();
-    expect(q('.ccf-sf-open').textContent).toMatch(/Find my size/);
+window.__ccfSizeCreatingMs = 0; // no waiting on the "Creating your avatar" step in tests
+
+const ADD_PAGE = (extra = '') => `
+  <div class="shopify-section">
+    <form action="/cart/add">
+      <fieldset><legend>Size</legend>
+        <input type="radio" name="Size" value="S" checked>
+        <input type="radio" name="Size" value="M">
+        <input type="radio" name="Size" value="L">
+      </fieldset>
+      <button type="submit" name="add" id="theme-add" ${extra}>Add to cart</button>
+    </form>
+    <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="kurta" data-size-option="Size"
+         data-size-values="S|M|L" data-product-title="Cotton Kurta" data-product-price="₹1,299"
+         data-product-image="//cdn.shopify.com/k.jpg" data-design-mode="false"></div>
+  </div>`;
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const title = () => q('.ccf-sf-title') && q('.ccf-sf-title').textContent;
+const open = () => q('.ccf-sf-open').click();
+async function toResult(base = 'Woman', build) {
+  open();
+  btn(base).click();
+  btn('Continue').click();
+  if (build) btn(build).click();
+  btn('Continue').click();
+  await flush(); await flush(); await flush();
+}
+
+describe('ccf-size.js — button on the product page', () => {
+  test('full-width "Find my ideal size" style button with the caption under it', async () => {
+    await load({ settings: { ...SETTINGS, buttonText: 'Find my ideal size', cardText: 'Takes 20 seconds' } });
+    expect(q('.ccf-sf-trigger').textContent).toBe('Find my ideal size');
+    expect(q('.ccf-sf-caption').textContent).toBe('Takes 20 seconds');
     expect(q('.ccf-sf-panel').hidden).toBe(true);
+  });
+
+  test('style and corners from the admin', async () => {
+    await load({ settings: { ...SETTINGS, buttonStyle: 'soft', buttonRadius: 8 } });
+    expect(q('.ccf-sf-trigger').classList.contains('is-soft')).toBe(true);
+    expect(q('.ccf-sf-trigger').style.borderRadius).toBe('8px');
+    await load({ settings: { ...SETTINGS, buttonStyle: 'filled' } });
+    expect(q('.ccf-sf-trigger').classList.contains('is-filled')).toBe(true);
+    expect(q('.ccf-sf-trigger').style.borderRadius).toBe('999px');
   });
 
   test('hidden when off, when the tag does not match, or when there is no Size option', async () => {
@@ -89,143 +128,11 @@ describe('ccf-size.js', () => {
     expect(q('#ccf-sf-root')).toBeNull();
   });
 
-  test('theme editor explains why it is hidden instead of removing it', async () => {
+  test('theme editor explains why it is hidden; stays where it is in the editor', async () => {
     await load({ settings: { ...SETTINGS, enabled: false }, design: 'true' });
     expect(q('#ccf-sf-root').textContent).toMatch(/Turn on "Find my size"/);
-  });
-
-  test('full flow: answers are sent, result shows size and reasons, Select picks it on the page', async () => {
-    await load();
-    q('.ccf-sf-open').click();
-    expect(q('.ccf-sf-step').textContent).toBe('Step 1 of 3');
-    btn('Menswear').click();
-    const height = q('input[aria-label="Height"]');
-    height.value = '178';
-    height.dispatchEvent(new Event('input'));
-    btn('Continue').click();
-    btn('Broad').click();
-    btn('Relaxed').click();
-    btn('See my size').click();
-    await flush(); await flush();
-
-    // The last call is "See my size" (earlier ones are the live estimate).
-    expect(recommendBodies.at(-1)).toEqual({
-      gender: 'men', heightCm: 178, weightKg: 60, shape: 'broad', fit: 'relaxed', remember: false, sessionId: '',
-    });
-    expect(q('.ccf-sf-size').textContent).toBe('M');
-    const reasons = Array.from(document.querySelectorAll('.ccf-sf-reason')).map((r) => r.textContent);
-    expect(reasons).toEqual(['ChestRight for your fit', 'WaistA little roomy', 'LengthGarment length 106 cm']);
-
-    btn('Select size M').click();
-    expect(q('input[name="Size"][value="M"]').checked).toBe(true);
-    expect(sizeEvents).toEqual([{ option: 'Size', value: 'M' }]);
-    expect(q('.ccf-sf-open').textContent).toMatch(/Your size: M/);
-  });
-
-  test('"remember" sends the session id; answers pre-fill next time', async () => {
-    await load();
-    localStorage.setItem('ccf_analytics_session_demo.myshopify.com', 'abc12345-session');
-    q('.ccf-sf-open').click();
-    btn('Continue').click();
-    q('.ccf-sf-check input').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    expect(recommendBodies.at(-1).remember).toBe(true);
-    expect(recommendBodies.at(-1).sessionId).toBe('abc12345-session');
-    const stored = JSON.parse(localStorage.getItem('ccf_size_answers_demo.myshopify.com'));
-    expect(stored.gender).toBe('women');
-  });
-
-  test('height in feet and inches', async () => {
-    await load();
-    q('.ccf-sf-open').click();
-    btn('ft/in').click();
-    const values = Array.from(document.querySelectorAll('.ccf-sf-value')).map((v) => v.textContent);
-    expect(values[0]).toBe('5′ 4″'); // 162 cm
-  });
-
-  test('size the product does not have → explained, no Select button', async () => {
-    await load({ sizeValues: 'S|M', recommend: { ok: true, size: 'XL', reasons: [], saved: false } });
-    q('.ccf-sf-open').click();
-    btn('Continue').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    expect(q('.ccf-sf-result').textContent).toMatch(/doesn’t come in XL/);
-    expect(btn('Select size XL')).toBeUndefined();
-  });
-
-  test('server error is shown and the shopper can try again', async () => {
-    await load({ recommend: { ok: false, error: 'Check your height and weight and try again.' } });
-    q('.ccf-sf-open').click();
-    btn('Continue').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    expect(q('.ccf-sf-err').textContent).toBe('Check your height and weight and try again.');
-    expect(btn('See my size')).toBeDefined();
-  });
-
-  test('size chart table in the chosen unit', async () => {
-    await load();
-    q('.ccf-sf-open').click();
-    btn('Continue').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    btn('View size chart').click();
-    const cells = Array.from(document.querySelectorAll('.ccf-sf-table td')).map((c) => c.textContent);
-    expect(cells.slice(0, 4)).toEqual(['S', '86', '71', '105']);
-  });
-
-  test('select dropdown themes are supported too', async () => {
-    await load();
-    document.body.insertAdjacentHTML('beforeend',
-      '<label for="opt-size">Size</label><select id="opt-size" name="options[Size]"><option>S</option><option>M</option></select>');
-    expect(window.__ccfSizeFinder.selectSizeOnPage('Size', 'M')).toBe(true);
-  });
-});
-
-describe('ccf-size.js design details', () => {
-  test('progress bar, close button, option card hints and fit meter', async () => {
-    await load();
-    q('.ccf-sf-open').click();
-    expect(document.querySelectorAll('.ccf-sf-progress span.on')).toHaveLength(1);
-    btn('Continue').click();
-    expect(document.querySelectorAll('.ccf-sf-progress span.on')).toHaveLength(2);
-    expect(btn('Broad').textContent).toBe('BroadWider frame');
-    btn('See my size').click();
-    await flush(); await flush();
-    expect(q('.ccf-sf-title').textContent).toBe('Your size');
-    expect(q('.ccf-sf-meter-dot').style.left).toBe('50%'); // chest "right"
-    btn('Close').click();
-    expect(q('.ccf-sf-panel').hidden).toBe(true);
-  });
-});
-
-describe('ccf-size.js — card that shoppers notice', () => {
-  test('a clear card: question, short promise and the button text', async () => {
-    await load();
-    const card = q('.ccf-sf-trigger');
-    expect(card.querySelector('.ccf-sf-card-title').textContent).toBe('Not sure about your size?');
-    expect(card.querySelector('.ccf-sf-card-sub').textContent).toMatch(/takes 20 seconds/);
-    expect(card.querySelector('.ccf-sf-cta').textContent).toBe('Find my size →');
-  });
-
-  test('heading and small text come from the admin', async () => {
-    await load({ settings: { ...SETTINGS, cardTitle: 'Find your perfect fit', cardText: 'Takes 20 seconds', buttonText: 'Check size' } });
-    expect(q('.ccf-sf-card-title').textContent).toBe('Find your perfect fit');
-    expect(q('.ccf-sf-card-sub').textContent).toBe('Takes 20 seconds');
-    expect(q('.ccf-sf-cta').textContent).toBe('Check size →');
-  });
-
-  test('button style and corners come from the admin', async () => {
-    await load();
-    expect(q('.ccf-sf-cta').className).toBe('ccf-sf-cta');
-    expect(q('.ccf-sf-cta').style.borderRadius).toBe('999px');
-    await load({ settings: { ...SETTINGS, buttonStyle: 'outline', buttonRadius: 6 } });
-    expect(q('.ccf-sf-cta').classList.contains('is-outline')).toBe(true);
-    expect(q('.ccf-sf-cta').style.borderRadius).toBe('6px');
-    await load({ settings: { ...SETTINGS, buttonStyle: 'soft', buttonRadius: 0 } });
-    expect(q('.ccf-sf-cta').classList.contains('is-soft')).toBe(true);
-    expect(q('.ccf-sf-cta').style.borderRadius).toBe('0px');
+    await load({ design: 'true' });
+    expect(q('form').nextElementSibling.id).toBe('ccf-sf-root');
   });
 
   test('moves right under the Size picker, even when the theme put the block lower down', async () => {
@@ -234,38 +141,11 @@ describe('ccf-size.js — card that shoppers notice', () => {
         <form action="/cart/add">
           <variant-selects id="vs"><fieldset><legend>Color</legend></fieldset><fieldset><legend>Size</legend>
             <input type="radio" name="Size" value="S" checked><input type="radio" name="Size" value="M"></fieldset></variant-selects>
-          <div id="price">₹999</div>
         </form>
         <p id="desc">Description</p>
         <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>
       </div>` });
-    // Placed after the whole variant picker (outside it, because themes redraw the picker).
     expect(q('#vs').nextElementSibling.id).toBe('ccf-sf-root');
-  });
-
-  test('stays where it is in the theme editor', async () => {
-    await load({ design: 'true' });
-    expect(q('form').nextElementSibling.id).toBe('ccf-sf-root');
-  });
-
-  test('after choosing, the card shows "Your size" and remembers it on the next visit', async () => {
-    await load();
-    q('.ccf-sf-open').click();
-    btn('Continue').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    btn('Select size M').click();
-    expect(q('.ccf-sf-trigger').classList.contains('is-done')).toBe(true);
-    expect(q('.ccf-sf-cta').textContent).toBe('Change');
-
-    await load({ keepStorage: true });
-    expect(q('.ccf-sf-card-title').textContent).toBe('Your size: M');
-  });
-
-  test('a remembered size the product does not sell is not shown', async () => {
-    localStorage.setItem('ccf_size_answers_demo.myshopify.com', JSON.stringify({ size: 'XXL' }));
-    await load({ keepStorage: true });
-    expect(q('.ccf-sf-card-title').textContent).toBe('Not sure about your size?');
   });
 
   test('tries the settings call again once when the network fails', async () => {
@@ -281,127 +161,230 @@ describe('ccf-size.js — card that shoppers notice', () => {
   });
 });
 
-describe('ccf-size.js — words and parts set in the admin', () => {
-  const custom = {
-    ...SETTINGS,
-    texts: { womenLabel: 'Ladies', menLabel: 'Gents', advisorTitle: 'Fit guide', step1Title: 'Your body', step1Text: 'Quick and easy.',
-      step2Title: 'Fit choice', step2Text: 'Pick one.', resultTitle: 'Best size', addToBagText: 'Buy {size} now' },
-  };
-
-  test('custom words show in the drawer', async () => {
-    await load({ settings: custom, pageHtml: `
-      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S"><input type="radio" name="Size" value="M"></fieldset>
-        <button type="submit" name="add">Add</button></form>
-      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
-    q('.ccf-sf-open').click();
-    expect(q('.ccf-sf-brand').textContent).toBe('Fit guide');
-    expect(q('.ccf-sf-title').textContent).toBe('Your body');
-    expect(q('.ccf-sf-lede').textContent).toBe('Quick and easy.');
-    expect(btn('Ladies')).toBeDefined();
-    expect(btn('Gents')).toBeDefined();
-    btn('Continue').click();
-    expect(q('.ccf-sf-title').textContent).toBe('Fit choice');
-    btn('See my size').click();
-    await flush(); await flush();
-    expect(q('.ccf-sf-title').textContent).toBe('Best size');
-    expect(btn('Buy M now')).toBeDefined();
+describe('ccf-size.js — "Try it on me" steps', () => {
+  test('step 1: avatar base — stepper, Man / Woman rows, privacy note', async () => {
+    await load();
+    open();
+    expect(q('.ccf-sf-panel').hidden).toBe(false);
+    expect(q('.ccf-sf-htitle').textContent).toBe('Find my size');
+    expect(q('.ccf-sf-stepper').getAttribute('aria-label')).toBe('Step 1 of 4');
+    expect(document.querySelectorAll('.ccf-sf-dot')).toHaveLength(4);
+    expect(title()).toBe('Choose your avatar base');
+    const rows = Array.from(document.querySelectorAll('.ccf-sf-row')).map((r) => r.getAttribute('aria-label'));
+    expect(rows).toEqual(['Man', 'Woman']);
+    expect(q('.ccf-sf-privacy').textContent).toBe('Your data stays private and secure');
   });
 
-  test('parts turned off are not shown', async () => {
-    await load({ settings: { ...SETTINGS, options: { liveEstimate: false, rememberSize: false, addToBag: false, sizeChart: false } }, pageHtml: `
-      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S"><input type="radio" name="Size" value="M"></fieldset>
-        <button type="submit" name="add">Add</button></form>
-      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
-    q('.ccf-sf-open').click();
-    await new Promise((res) => setTimeout(res, 10)); await flush();
-    expect(q('.ccf-sf-live')).toBeNull();
-    expect(recommendBodies).toHaveLength(0); // no live estimate calls
+  test('step 2: height and weight with values on the right; live "Likely size"; back arrow', async () => {
+    await load();
+    open();
+    btn('Woman').click();
+    expect(title()).toBe('Enter your height and weight');
+    expect(q('.ccf-sf-stepper').getAttribute('aria-label')).toBe('Step 2 of 4');
+    expect(q('.ccf-sf-dot.is-done')).not.toBeNull();
+    const vals = Array.from(document.querySelectorAll('.ccf-sf-fval')).map((v) => v.textContent);
+    expect(vals).toEqual(['165 cm', '62 kg']);
+    const h = q('input[aria-label="Height"]');
+    h.value = '178';
+    h.dispatchEvent(new Event('input'));
+    expect(q('.ccf-sf-fval').textContent).toBe('178 cm');
+    await wait(450); await flush();
+    expect(q('.ccf-sf-live b').textContent).toBe('M');
+    btn('Back').click();
+    expect(title()).toBe('Choose your avatar base');
+  });
+
+  test('height in feet and weight in pounds', async () => {
+    await load();
+    open();
+    btn('Woman').click();
+    btn('ft').click();
+    btn('lb').click();
+    const vals = Array.from(document.querySelectorAll('.ccf-sf-fval')).map((v) => v.textContent);
+    expect(vals[0]).toBe('5′ 5″');
+    expect(vals[1]).toBe('137 lb');
+  });
+
+  test('step 3: build cards Slim / Athletic / Balanced / Broad with a check; Balanced picked first', async () => {
+    await load();
+    open();
+    btn('Woman').click();
     btn('Continue').click();
-    expect(q('.ccf-sf-check')).toBeNull();
-    btn('See my size').click();
-    await flush(); await flush();
-    expect(btn('View size chart')).toBeUndefined();
-    expect(btn('Add size M to bag')).toBeUndefined();
-    expect(btn('Select size M')).toBeDefined();
+    expect(title()).toBe('Choose your build');
+    const builds = Array.from(document.querySelectorAll('.ccf-sf-build'));
+    expect(builds.map((b) => b.getAttribute('aria-label'))).toEqual(['Slim', 'Athletic', 'Balanced', 'Broad']);
+    expect(btn('Balanced').getAttribute('aria-pressed')).toBe('true');
+    btn('Athletic').click();
+    expect(btn('Athletic').getAttribute('aria-pressed')).toBe('true');
+    expect(btn('Balanced').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  test('step 4: "Creating your avatar" while the size is worked out, then the result', async () => {
+    await load();
+    open();
+    btn('Man').click();
+    const h = q('input[aria-label="Height"]');
+    h.value = '178';
+    h.dispatchEvent(new Event('input'));
+    btn('Continue').click();
+    btn('Athletic').click();
+    btn('Continue').click();
+    expect(title()).toBe('Creating your avatar');
+    expect(q('.ccf-sf-status').textContent).toBe('Generating…');
+    expect(q('.ccf-sf-pedestal')).not.toBeNull();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1)).toEqual({
+      gender: 'men', heightCm: 178, weightKg: 62, shape: 'athletic', fit: 'regular', remember: false, sessionId: '',
+    });
+    expect(q('.ccf-sf-rtitle').textContent).toBe('Recommended size');
+  });
+
+  test('result: product card, recommended size with its neighbours, Select size picks it on the page', async () => {
+    await load({ settings: { ...SETTINGS, charts: { ...SETTINGS.charts, women: [
+      { size: 'S', chest: 86, waist: 71, length: 105 }, { size: 'M', chest: 91, waist: 76, length: 106 }, { size: 'L', chest: 97, waist: 81, length: 107 },
+    ] } } });
+    await toResult('Woman');
+    const sizes = Array.from(document.querySelectorAll('.ccf-sf-size')).map((s) => s.textContent);
+    expect(sizes).toEqual(['SFits close', 'MRecommended', 'LRoomy fit']);
+    expect(q('.ccf-sf-size.is-rec').getAttribute('aria-pressed')).toBe('true');
+    expect(btn('Change my avatar')).toBeTruthy();
+    btn('Select size M').click();
+    expect(q('input[name="Size"][value="M"]').checked).toBe(true);
+    expect(sizeEvents).toEqual([{ option: 'Size', value: 'M' }]);
+    expect(q('.ccf-sf-trigger').classList.contains('is-done')).toBe(true);
+    expect(q('.ccf-sf-trigger').textContent).toBe('Your size: MChange');
+  });
+
+  test('add to cart: picks the size, shows "Added to cart", then presses the theme button', async () => {
+    await load({ pageHtml: ADD_PAGE() });
+    let added = 0;
+    q('#theme-add').addEventListener('click', (e) => { e.preventDefault(); added += 1; });
+    await toResult('Woman');
+    expect(q('.ccf-sf-pname').textContent).toBe('Cotton Kurta');
+    expect(q('.ccf-sf-pprice').textContent).toBe('₹1,299');
+    expect(q('.ccf-sf-thumb').getAttribute('src')).toBe('https://cdn.shopify.com/k.jpg');
+    expect(q('.ccf-sf-main').textContent).toBe('Add to cart');
+    q('.ccf-sf-main').click();
+    await wait(400);
+    expect(q('.ccf-sf-main').textContent).toBe(' Added to cart');
+    await wait(500);
+    expect(added).toBe(1);
+    expect(q('input[name="Size"][value="M"]').checked).toBe(true);
+    expect(q('.ccf-sf-panel').hidden).toBe(true);
+  });
+
+  test('picking another size changes the button; sold-out theme button → message', async () => {
+    await load({ pageHtml: ADD_PAGE('disabled') });
+    await toResult('Woman');
+    btn('S — Fits close').click();
+    expect(q('.ccf-sf-main').textContent).toBe('Add to cart');
+    expect(btn('Just select size S')).toBeTruthy();
+    q('.ccf-sf-main').click();
+    await wait(400);
+    expect(q('.ccf-sf-err').textContent).toBe('Size S is sold out right now.');
+  });
+
+  test('a size the product does not sell is marked and cannot be picked', async () => {
+    await load({ sizeValues: 'S' });
+    await toResult('Woman');
+    expect(btn('M — Not available')).toBeTruthy();
+    expect(q('.ccf-sf-size.is-out')).not.toBeNull();
+    expect(btn('Close')).toBeTruthy();
+  });
+
+  test('server error → back on the build step with the message', async () => {
+    await load({ recommend: { ok: false, error: 'No size chart for this choice' } });
+    await toResult('Woman');
+    expect(title()).toBe('Choose your build');
+    expect(q('.ccf-sf-err').textContent).toBe('No size chart for this choice');
+  });
+
+  test('remember my size sends the session id; answers and size pre-fill next time', async () => {
+    await load();
+    localStorage.setItem('ccf_analytics_session_demo.myshopify.com', 'abc12345-session');
+    open();
+    btn('Man').click();
+    btn('Continue').click();
+    q('.ccf-sf-check input').click();
+    btn('Continue').click();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1)).toMatchObject({ remember: true, sessionId: 'abc12345-session', gender: 'men' });
+    btn('Select size M').click();
+    await load({ keepStorage: true });
+    expect(q('.ccf-sf-trigger').textContent).toBe('Your size: MChange');
+    open();
+    expect(title()).toBe('Choose your avatar base');
+    expect(q('.ccf-sf-row.is-on').getAttribute('aria-label')).toBe('Man');
+  });
+
+  test('a remembered size the product does not sell is not shown', async () => {
+    localStorage.setItem('ccf_size_answers_demo.myshopify.com', JSON.stringify({ size: 'XXL' }));
+    await load({ keepStorage: true });
+    expect(q('.ccf-sf-trigger').classList.contains('is-done')).toBe(false);
+  });
+
+  test('size chart, edit details, change my avatar', async () => {
+    await load();
+    await toResult('Woman');
+    btn('View size chart').click();
+    expect(q('.ccf-sf-table tr.is-you').textContent).toMatch(/^M/);
+    btn('Edit details').click();
+    expect(title()).toBe('Enter your height and weight');
+    btn('Continue').click();
+    btn('Continue').click();
+    await flush(); await flush(); await flush();
+    btn('Change my avatar').click();
+    expect(title()).toBe('Choose your avatar base');
+  });
+
+  test('Esc and the backdrop close the sheet', async () => {
+    await load();
+    open();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(q('.ccf-sf-panel').hidden).toBe(true);
+    open();
+    q('.ccf-sf-overlay').click();
+    expect(q('.ccf-sf-panel').hidden).toBe(true);
   });
 });
 
-describe('ccf-size.js — size advisor drawer', () => {
-  test('opens as a dialog on <body> with the product, closes with Esc or the backdrop', async () => {
-    await load({ pageHtml: `
-      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S"><input type="radio" name="Size" value="M"></fieldset></form>
-      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M"
-           data-product-title="Cotton Kurta" data-product-price="₹1,299" data-design-mode="false"></div>` });
-    q('.ccf-sf-open').click();
-    const panel = q('.ccf-sf-panel');
-    expect(panel.parentElement).toBe(document.body);
-    expect(panel.getAttribute('role')).toBe('dialog');
-    expect(q('.ccf-sf-brand').textContent).toBe('Size advisor');
-    expect(q('.ccf-sf-pname').textContent).toBe('Cotton Kurta');
-    expect(q('.ccf-sf-pprice').textContent).toBe('₹1,299');
-    expect(q('.ccf-sf-stepline').textContent).toBe('Step 1 of 3 · Measurements');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(panel.hidden).toBe(true);
-    q('.ccf-sf-open').click();
-    q('.ccf-sf-overlay').click();
-    expect(panel.hidden).toBe(true);
-  });
-
-  test('live estimate on step 1, and − / + change the height', async () => {
-    await load({ recommend: { ok: true, size: 'S', reasons: [], saved: false } });
-    q('.ccf-sf-open').click();
-    await new Promise((res) => setTimeout(res, 10)); await flush(); await flush();
-    expect(q('.ccf-sf-live-size').textContent).toBe('S');
-    expect(recommendBodies[0]).toMatchObject({ shape: 'average', fit: 'regular', remember: false });
-    btn('More height').click();
-    expect(q('.ccf-sf-value').textContent).toBe('163cm');
-    btn('Less height').click();
-    btn('Less height').click();
-    expect(q('.ccf-sf-value').textContent).toBe('161cm');
-  });
-
-  test('result: size ring, YOU marker on the size strip, edit details goes back', async () => {
-    await load();
-    q('.ccf-sf-open').click();
+describe('ccf-size.js — words and parts set in the admin', () => {
+  test('custom words are used', async () => {
+    await load({ settings: { ...SETTINGS, texts: {
+      advisorTitle: 'Try it on me', menLabel: 'Gents', womenLabel: 'Ladies', step3Title: 'Your body type',
+      creatingTitle: 'Building you', privacyText: 'Private', resultTitle: 'Your best size', addToBagText: 'Bag size {size}',
+    } }, pageHtml: ADD_PAGE() });
+    open();
+    expect(q('.ccf-sf-htitle').textContent).toBe('Try it on me');
+    expect(btn('Gents')).toBeTruthy();
+    expect(q('.ccf-sf-privacy').textContent).toBe('Private');
+    btn('Ladies').click();
     btn('Continue').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    expect(q('.ccf-sf-ring .ccf-sf-size').textContent).toBe('M');
-    expect(q('.ccf-sf-strip .is-you').textContent).toBe('M');
-    btn('Edit details').click();
-    expect(q('.ccf-sf-step').textContent).toBe('Step 1 of 3');
+    expect(title()).toBe('Your body type');
+    btn('Continue').click();
+    expect(title()).toBe('Building you');
+    await flush(); await flush(); await flush();
+    expect(q('.ccf-sf-rtitle').textContent).toBe('Your best size');
+    expect(btn('Bag size M')).toBeTruthy();
   });
 
-  test('"Add size M to bag" picks M and presses the theme add-to-cart button', async () => {
-    await load({ pageHtml: `
-      <form action="/cart/add" id="pf"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S" checked><input type="radio" name="Size" value="M"></fieldset>
-        <button type="submit" name="add" id="add">Add to cart</button></form>
-      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
-    let added = 0;
-    q('#pf').addEventListener('submit', (e) => { e.preventDefault(); added += 1; });
-    q('.ccf-sf-open').click();
+  test('parts turned off: live estimate, remember my size, size chart, add to cart', async () => {
+    await load({ settings: { ...SETTINGS, options: { liveEstimate: false, rememberSize: false, addToBag: false, sizeChart: false } }, pageHtml: ADD_PAGE() });
+    open();
+    btn('Woman').click();
+    expect(q('.ccf-sf-live')).toBeNull();
     btn('Continue').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    btn('Add size M to bag').click();
-    expect(q('input[name="Size"][value="M"]').checked).toBe(true);
-    await new Promise((res) => setTimeout(res, 400));
-    expect(added).toBe(1);
-    expect(q('.ccf-sf-panel').hidden).toBe(true);
-    expect(q('.ccf-sf-card-title').textContent).toBe('Your size: M');
+    expect(q('.ccf-sf-check')).toBeNull();
+    btn('Continue').click();
+    await flush(); await flush(); await flush();
+    expect(btn('View size chart')).toBeFalsy();
+    expect(q('.ccf-sf-main').textContent).toBe('Select size M');
   });
 
-  test('sold-out size: explains instead of adding', async () => {
-    await load({ pageHtml: `
-      <form action="/cart/add"><fieldset><legend>Size</legend><input type="radio" name="Size" value="S" checked><input type="radio" name="Size" value="M"></fieldset>
-        <button type="submit" name="add" disabled>Sold out</button></form>
-      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="S|M" data-design-mode="false"></div>` });
-    q('.ccf-sf-open').click();
-    btn('Continue').click();
-    btn('See my size').click();
-    await flush(); await flush();
-    btn('Add size M to bag').click();
-    await new Promise((res) => setTimeout(res, 400));
-    expect(q('.ccf-sf-err').textContent).toBe('Size M is sold out right now.');
+  test('only one chart → only that avatar base', async () => {
+    await load({ settings: { ...SETTINGS, genders: ['women'] } });
+    open();
+    const rows = Array.from(document.querySelectorAll('.ccf-sf-row')).map((r) => r.getAttribute('aria-label'));
+    expect(rows).toEqual(['Woman']);
   });
 });

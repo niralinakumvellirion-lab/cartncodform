@@ -10,7 +10,14 @@
  */
 
 const GENDERS = ['women', 'men'];
-const SHAPES = { slim: -3, average: 0, broad: 3 };
+// Body build → shift of the estimated chest / waist in cm. "average" is shown as "Balanced".
+const SHAPES = { slim: -3, athletic: 0, average: 0, broad: 3 };
+const SHAPE_SHIFT = {
+  slim: { chest: -3, waist: -3 },
+  athletic: { chest: 1, waist: -2 }, // broader chest, narrower waist
+  average: { chest: 0, waist: 0 },
+  broad: { chest: 3, waist: 3 },
+};
 const FITS = { snug: -2, regular: 0, relaxed: 4 };
 
 // Indian starter charts (body measurements, cm). Merchants edit them in the admin.
@@ -81,16 +88,34 @@ const BUTTON_STYLES = ['filled', 'outline', 'soft'];
 
 /** Words in the size advisor the store can change: [default, max length]. {size} = the recommended size. */
 const ADVISOR_TEXTS = {
-  womenLabel: ['Womenswear', 24],
-  menLabel: ['Menswear', 24],
-  advisorTitle: ['Size advisor', 30],
-  step1Title: ['Let’s find your fit', 50],
-  step1Text: ['Two measurements, about ten seconds.', 90],
-  step2Title: ['How do you like it to fit?', 50],
-  step2Text: ['Two quick choices make the size more accurate.', 90],
-  resultTitle: ['Your size', 40],
-  addToBagText: ['Add size {size} to bag', 40],
+  womenLabel: ['Woman', 24],
+  menLabel: ['Man', 24],
+  advisorTitle: ['Find my size', 30],
+  step1Title: ['Choose your avatar base', 50],
+  step1Text: ['Pick the one closest to you.', 90],
+  step2Title: ['Enter your height and weight', 50],
+  step2Text: ['Used only to work out your size.', 90],
+  step3Title: ['Choose your build', 50],
+  step3Text: ['Pick the one that looks most like you.', 90],
+  creatingTitle: ['Creating your avatar', 40],
+  resultTitle: ['Recommended size', 40],
+  addToBagText: ['Add to cart', 40],
+  privacyText: ['Your data stays private and secure', 80],
 };
+// Defaults of the earlier design: a store that never changed them gets the new words.
+const LEGACY_TEXTS = {
+  womenLabel: 'Womenswear',
+  menLabel: 'Menswear',
+  advisorTitle: 'Size advisor',
+  step1Title: 'Let’s find your fit',
+  step1Text: 'Two measurements, about ten seconds.',
+  step2Title: 'How do you like it to fit?',
+  step2Text: 'Two quick choices make the size more accurate.',
+  resultTitle: 'Your size',
+  addToBagText: 'Add size {size} to bag',
+};
+const BUTTON_DEFAULT = 'Find my ideal size';
+const LEGACY_BUTTON = 'Find my size';
 /** Parts of the size advisor the store can turn off. */
 const ADVISOR_OPTIONS = { liveEstimate: true, rememberSize: true, addToBag: true, sizeChart: true };
 
@@ -99,7 +124,8 @@ function cleanTexts(t) {
   const out = {};
   Object.keys(ADVISOR_TEXTS).forEach((k) => {
     const [def, max] = ADVISOR_TEXTS[k];
-    out[k] = String(src[k] == null ? '' : src[k]).replace(/\s+/g, ' ').trim().slice(0, max) || def;
+    const v = String(src[k] == null ? '' : src[k]).replace(/\s+/g, ' ').trim().slice(0, max);
+    out[k] = v && v !== LEGACY_TEXTS[k] ? v : def;
   });
   return out;
 }
@@ -108,6 +134,10 @@ function cleanOptions(o) {
   const out = {};
   Object.keys(ADVISOR_OPTIONS).forEach((k) => { out[k] = typeof src[k] === 'boolean' ? src[k] : ADVISOR_OPTIONS[k]; });
   return out;
+}
+function cleanButton(v) {
+  const t = String(v || '').trim().slice(0, 40);
+  return t && t !== LEGACY_BUTTON ? t : BUTTON_DEFAULT;
 }
 const MAX_RADIUS = 24; // 24 = fully round (pill)
 function cleanRadius(v) {
@@ -122,10 +152,10 @@ function sanitizeSettings(raw) {
   const out = {
     enabled: r.enabled === true,
     productTag: tag,
-    buttonText: String(r.buttonText || '').trim().slice(0, 40) || 'Find my size',
+    buttonText: cleanButton(r.buttonText),
     cardTitle: String(r.cardTitle || '').trim().slice(0, 60) || CARD_DEFAULTS.cardTitle,
     cardText: String(r.cardText || '').trim().slice(0, 80) || CARD_DEFAULTS.cardText,
-    buttonStyle: BUTTON_STYLES.includes(r.buttonStyle) ? r.buttonStyle : 'filled',
+    buttonStyle: BUTTON_STYLES.includes(r.buttonStyle) ? r.buttonStyle : 'outline',
     buttonRadius: cleanRadius(r.buttonRadius),
     texts: cleanTexts(r.texts),
     options: cleanOptions(r.options),
@@ -149,10 +179,10 @@ function withDefaults(doc) {
   return {
     enabled: d.enabled === true,
     productTag: String(d.productTag || ''),
-    buttonText: String(d.buttonText || 'Find my size'),
+    buttonText: cleanButton(d.buttonText),
     cardTitle: String(d.cardTitle || CARD_DEFAULTS.cardTitle),
     cardText: String(d.cardText || CARD_DEFAULTS.cardText),
-    buttonStyle: BUTTON_STYLES.includes(d.buttonStyle) ? d.buttonStyle : 'filled',
+    buttonStyle: BUTTON_STYLES.includes(d.buttonStyle) ? d.buttonStyle : 'outline',
     buttonRadius: cleanRadius(d.buttonRadius),
     texts: cleanTexts(d.texts),
     options: cleanOptions(d.options),
@@ -209,16 +239,16 @@ function sanitizeAnswers(raw) {
  * shifted by body shape. Good enough to point at a size, not a tailor's measurement.
  */
 function estimateBody({ gender, heightCm, weightKg, shape }) {
-  const s = SHAPES[shape] || 0;
+  const s = SHAPE_SHIFT[shape] || SHAPE_SHIFT.average;
   if (gender === 'men') {
     return {
-      chest: 0.6 * weightKg + 0.25 * heightCm + 10 + s,
-      waist: 0.7 * weightKg + 0.15 * heightCm + 6 + s,
+      chest: 0.6 * weightKg + 0.25 * heightCm + 10 + s.chest,
+      waist: 0.7 * weightKg + 0.15 * heightCm + 6 + s.waist,
     };
   }
   return {
-    chest: 0.65 * weightKg + 0.2 * heightCm + 18 + s,
-    waist: 0.6 * weightKg + 0.15 * heightCm + 14 + s,
+    chest: 0.65 * weightKg + 0.2 * heightCm + 18 + s.chest,
+    waist: 0.6 * weightKg + 0.15 * heightCm + 14 + s.waist,
   };
 }
 

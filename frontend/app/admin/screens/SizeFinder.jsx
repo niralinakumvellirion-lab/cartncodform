@@ -44,7 +44,7 @@ export function fitScale(previewHeight, viewportHeight) {
 export default function SizeFinderScreen({ shop }) {
   const [settings, setSettings] = useState(null);
   const [gender, setGender] = useState('women');
-  const [previewView, setPreviewView] = useState(3);
+  const [previewView, setPreviewView] = useState(5);
   // Which preview to show: the part the seller is editing ('card' / 'advisor'), or 'both'.
   const [previewShow, setPreviewShow] = useState('both');
   const [highlight, setHighlight] = useState(null); // { key, label } of the field being edited
@@ -191,7 +191,7 @@ export default function SizeFinderScreen({ shop }) {
       <div style={ui.head}>
         <div>
           <h1 style={ui.h1}>Find my size</h1>
-          <p style={{ ...ui.muted, margin: '0 0 10px' }}>A size advisor on your product pages: shoppers enter height, weight and fit, and get the right size from your chart.</p>
+          <p style={{ ...ui.muted, margin: '0 0 10px' }}>A “Try it on me” size advisor on your product pages: shoppers pick an avatar, enter height and weight, choose a build and get the right size from your chart.</p>
           <span style={{ ...ui.pill, ...(settings.enabled ? ui.pillOn : ui.pillOff) }}>
             <span style={{ ...ui.dot, background: settings.enabled ? '#047857' : '#B45309' }} />
             {settings.enabled ? 'Showing on your store' : 'Hidden — turn on and save to show it'}
@@ -241,30 +241,8 @@ export default function SizeFinderScreen({ shop }) {
         </label>
       </section>
 
-      <section style={ui.card} aria-label="Card on the product page" {...focusArea('card')}>
-        <SectionHead icon="card" title="Card on the product page" text="Shoppers see this card right under the Size buttons. The preview updates as you type." />
-        <label style={ui.field} data-hl="cardTitle" data-hl-label="Card heading">Heading
-          <input
-            type="text"
-            maxLength={60}
-            value={settings.cardTitle ?? ''}
-            onChange={(e) => set({ cardTitle: e.target.value })}
-            placeholder="Not sure about your size?"
-            style={ui.input}
-            aria-label="Card heading"
-          />
-        </label>
-        <label style={ui.field} data-hl="cardText" data-hl-label="Card small text">Small text
-          <input
-            type="text"
-            maxLength={80}
-            value={settings.cardText ?? ''}
-            onChange={(e) => set({ cardText: e.target.value })}
-            placeholder="3 quick questions · takes 20 seconds"
-            style={ui.input}
-            aria-label="Card small text"
-          />
-        </label>
+      <section style={ui.card} aria-label="Button on the product page" {...focusArea('card')}>
+        <SectionHead icon="card" title="Button on the product page" text="A full-width button right under the Size buttons. It opens the size advisor. The preview updates as you type." />
         <label style={ui.field} data-hl="buttonText" data-hl-label="Button text">Button text
           <input
             type="text"
@@ -273,6 +251,17 @@ export default function SizeFinderScreen({ shop }) {
             onChange={(e) => set({ buttonText: e.target.value })}
             style={ui.input}
             aria-label="Button text"
+          />
+        </label>
+        <label style={ui.field} data-hl="cardText" data-hl-label="Caption under the button">Caption under the button (optional)
+          <input
+            type="text"
+            maxLength={80}
+            value={settings.cardText ?? ''}
+            onChange={(e) => set({ cardText: e.target.value })}
+            placeholder="3 quick questions · takes 20 seconds"
+            style={ui.input}
+            aria-label="Caption under the button"
           />
         </label>
         <label style={ui.field} data-hl="accentColor" data-hl-label="Button colour">Button colour
@@ -357,41 +346,49 @@ export default function SizeFinderScreen({ shop }) {
       </section>
 
       <section style={ui.card} aria-label="Size advisor" {...focusArea('advisor')}>
-        <SectionHead icon="panel" title="Size advisor" text="The panel that opens when shoppers click the card. Click a box and the preview jumps to that step." />
-
-        <p style={ui.group}>Womenswear / Menswear buttons</p>
-        <div className="sf-grid2">
-          {textField('Womenswear button', 'womenLabel', 1)}
-          {textField('Menswear button', 'menLabel', 1)}
-        </div>
+        <SectionHead icon="panel" title="Size advisor" text="The panel that opens from the button: avatar base, height & weight, build, then the recommended size. Click a box and the preview jumps to that screen." />
 
         <p style={ui.group}>Panel</p>
-        {textField('Panel title', 'advisorTitle', 1)}
+        <div className="sf-grid2">
+          {textField('Panel title', 'advisorTitle', 1)}
+          {textField('Privacy note', 'privacyText', 1)}
+        </div>
 
-        <p style={ui.group}>Step 1 · Measurements</p>
+        <p style={ui.group}>Step 1 · Avatar base</p>
         <div className="sf-grid2">
           {textField('Step 1 heading', 'step1Title', 1)}
           {textField('Step 1 small text', 'step1Text', 1)}
+          {textField('Woman label', 'womenLabel', 1)}
+          {textField('Man label', 'menLabel', 1)}
         </div>
 
-        <p style={ui.group}>Step 2 · Fit</p>
+        <p style={ui.group}>Step 2 · Height and weight</p>
         <div className="sf-grid2">
           {textField('Step 2 heading', 'step2Title', 2)}
           {textField('Step 2 small text', 'step2Text', 2)}
         </div>
 
+        <p style={ui.group}>Step 3 · Build</p>
+        <div className="sf-grid2">
+          {textField('Step 3 heading', 'step3Title', 3)}
+          {textField('Step 3 small text', 'step3Text', 3)}
+        </div>
+
+        <p style={ui.group}>Step 4 · Creating</p>
+        {textField('Creating heading', 'creatingTitle', 4)}
+
         <p style={ui.group}>Result</p>
         <div className="sf-grid2">
-          {textField('Result heading', 'resultTitle', 3)}
-          {textField('Add to bag button', 'addToBagText', 3, '{size} becomes the size, e.g. M')}
+          {textField('Result heading', 'resultTitle', 5)}
+          {textField('Add to cart button', 'addToBagText', 5, '{size} becomes the size, e.g. M')}
         </div>
 
         <p style={ui.group}>Show in the size advisor</p>
         <div style={ui.toggles}>
-          {optionSwitch('liveEstimate', 1, 'Live estimate', 'Shows a size while shoppers move the sliders (step 1).')}
-          {optionSwitch('rememberSize', 2, '“Remember my size”', 'Lets shoppers save their size for next time (step 2).')}
-          {optionSwitch('addToBag', 3, 'Add to bag button', 'Picks the size and adds it to the cart in one tap.')}
-          {optionSwitch('sizeChart', 3, '“View size chart” link', 'Shows your size chart under the result.')}
+          {optionSwitch('liveEstimate', 2, 'Likely size', 'Shows a likely size while shoppers move the sliders (step 2).')}
+          {optionSwitch('rememberSize', 3, '“Remember my size”', 'Lets shoppers save their size for next time (step 3).')}
+          {optionSwitch('addToBag', 5, 'Add to cart button', 'Picks the size and adds it to the cart in one tap.')}
+          {optionSwitch('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.')}
         </div>
       </section>
 
@@ -489,7 +486,7 @@ export default function SizeFinderScreen({ shop }) {
 }
 
 // Fields whose preview part lives on one step: editing them opens that step.
-const HL_VIEW = { chart: 3, unit: 1 };
+const HL_VIEW = { chart: 5, unit: 2 };
 
 const ICONS = {
   pin: <path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,

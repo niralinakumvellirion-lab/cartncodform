@@ -6,24 +6,27 @@ import { apiSend } from '../../../lib/api';
 const CM_PER_IN = 2.54;
 const KG_PER_LB = 0.45359237;
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
-const REASON_TEXT = { right: 'Right for your fit', snug: 'A little snug', roomy: 'A little roomy' };
-const STEP_NAMES = { 1: 'Measurements', 2: 'Your fit', 3: 'Your size' };
 
 /** Size advisor words the store can change — same defaults and limits as backend utils/sizeFinder.js. */
 export const ADVISOR_TEXT_DEFAULTS = {
-  womenLabel: 'Womenswear',
-  menLabel: 'Menswear',
-  advisorTitle: 'Size advisor',
-  step1Title: 'Let’s find your fit',
-  step1Text: 'Two measurements, about ten seconds.',
-  step2Title: 'How do you like it to fit?',
-  step2Text: 'Two quick choices make the size more accurate.',
-  resultTitle: 'Your size',
-  addToBagText: 'Add size {size} to bag',
+  womenLabel: 'Woman',
+  menLabel: 'Man',
+  advisorTitle: 'Find my size',
+  step1Title: 'Choose your avatar base',
+  step1Text: 'Pick the one closest to you.',
+  step2Title: 'Enter your height and weight',
+  step2Text: 'Used only to work out your size.',
+  step3Title: 'Choose your build',
+  step3Text: 'Pick the one that looks most like you.',
+  creatingTitle: 'Creating your avatar',
+  resultTitle: 'Recommended size',
+  addToBagText: 'Add to cart',
+  privacyText: 'Your data stays private and secure',
 };
 export const ADVISOR_TEXT_MAX = {
   womenLabel: 24, menLabel: 24, advisorTitle: 30, step1Title: 50, step1Text: 90,
-  step2Title: 50, step2Text: 90, resultTitle: 40, addToBagText: 40,
+  step2Title: 50, step2Text: 90, step3Title: 50, step3Text: 90, creatingTitle: 40,
+  resultTitle: 40, addToBagText: 40, privacyText: 80,
 };
 export const ADVISOR_OPTION_DEFAULTS = { liveEstimate: true, rememberSize: true, addToBag: true, sizeChart: true };
 /** Text with an empty value falling back to the default; {size} filled in. */
@@ -31,8 +34,13 @@ export function advisorText(texts, key, size) {
   const v = texts && typeof texts[key] === 'string' && texts[key].trim() ? texts[key].trim() : ADVISOR_TEXT_DEFAULTS[key];
   return size == null ? v : v.replace(/\{size\}/g, size);
 }
-const SHAPES = [['slim', 'Slim', 'Narrow frame'], ['average', 'Average', 'Medium frame'], ['broad', 'Broad', 'Wider frame']];
-const FITS = [['snug', 'Snug', 'Close to body'], ['regular', 'Regular', 'Classic fit'], ['relaxed', 'Relaxed', 'Loose and easy']];
+// Same builds as ccf-size.js; "average" is shown as Balanced.
+export const BUILDS = [
+  ['slim', 'Slim', 'Lean, narrow frame', 0.86],
+  ['athletic', 'Athletic', 'Broad chest, fit waist', 1.02],
+  ['average', 'Balanced', 'Average proportions', 1],
+  ['broad', 'Broad', 'Wider, fuller frame', 1.18],
+];
 
 export function heightLabel(cm, unit) {
   if (unit !== 'ft') return `${Math.round(cm)} cm`;
@@ -42,64 +50,75 @@ export function heightLabel(cm, unit) {
 export function weightLabel(kg, unit) {
   return unit === 'lb' ? `${Math.round(kg / KG_PER_LB)} lb` : `${Math.round(kg)} kg`;
 }
-/** Corner radius of the card button: 24 or more = fully round. Same rule as ccf-size.js. */
+/** Corner radius of the product-page button: 24 or more = fully round. Same rule as ccf-size.js. */
 export function ctaRadius(v) {
   const n = Number(v);
   if (v === undefined || v === null || v === '' || !Number.isFinite(n) || n >= 24) return '999px';
   return `${Math.max(0, Math.round(n))}px`;
 }
-// Fit-meter position (0–100) from the chest result — same as ccf-size.js.
-export function meterPosition(reasons) {
-  const chest = (reasons || []).find((x) => x.area === 'chest');
-  if (!chest) return 50;
-  return chest.status === 'snug' ? 18 : chest.status === 'roomy' ? 82 : 50;
-}
-/** Figure scale from height/weight — same rule as ccf-size.js figureSvg. */
-export function figureScale(heightCm, weightKg) {
+/** Mannequin scale from height/weight and build — same rule as ccf-size.js figureSvg. */
+export function figureScale(heightCm, weightKg, build = 'average') {
   const bmi = weightKg / ((heightCm / 100) ** 2);
+  const b = BUILDS.find((x) => x[0] === build);
   return {
-    x: Math.max(0.82, Math.min(1.35, bmi / 22)),
+    x: Math.max(0.8, Math.min(1.4, (bmi / 22) * (b ? b[3] : 1))),
     y: Math.max(0.88, Math.min(1.08, heightCm / 172)),
   };
 }
-
-function Ruler() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 15.5 15.5 3 21 8.5 8.5 21z" /><path d="m7 12 2 2M10 9l2 2M13 6l2 2" />
-    </svg>
-  );
+/** The recommended size with its neighbours and their notes (same as the storefront result). */
+export function sizeRows(chartSizes, rec) {
+  const at = chartSizes.indexOf(String(rec));
+  if (at === -1) return [{ size: String(rec), note: 'Recommended', rec: true }];
+  return chartSizes.slice(Math.max(0, at - 1), at + 2).map((s) => {
+    const i = chartSizes.indexOf(s);
+    return { size: s, note: i === at ? 'Recommended' : i < at ? 'Fits close' : 'Roomy fit', rec: i === at };
+  });
 }
-function Figure({ heightCm, weightKg }) {
-  const s = figureScale(heightCm, weightKg);
+
+const I = (props) => (
+  <svg width={props.s || 14} height={props.s || 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={props.w || 1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{props.children}</svg>
+);
+const HANGER = <><path d="M12 6a2 2 0 1 1 2 2c-1 .4-2 1-2 2.2V11" /><path d="M12 11 3.5 17a1.5 1.5 0 0 0 .9 2.7h15.2a1.5 1.5 0 0 0 .9-2.7L12 11z" /></>;
+const CHECK = <path d="M5 12l5 5L20 7" />;
+
+function Mannequin({ heightCm, weightKg, build = 'average', h = 120 }) {
+  const s = figureScale(heightCm, weightKg, build);
   return (
-    <svg width="44" height="118" viewBox="0 0 56 150" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    <svg width={Math.round(h * 0.42)} height={h} viewBox="0 0 64 160" aria-hidden="true"
       style={{ transform: `scale(${s.x.toFixed(3)},${s.y.toFixed(3)})`, transformOrigin: '50% 100%' }}>
-      <circle cx="28" cy="13" r="9" />
-      <path d="M28 22v4M17 30c3-3 7-4 11-4s8 1 11 4l4 34M17 30l-4 34M19 32v40l-2 74M37 32v40l2 74M28 74v72M19 72h18" />
+      <defs>
+        <linearGradient id={`sfpg${h}`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#B8B8B6" /><stop offset=".5" stopColor="#D9D9D7" /><stop offset="1" stopColor="#A8A8A6" />
+        </linearGradient>
+      </defs>
+      <g fill={`url(#sfpg${h})`}>
+        <ellipse cx="32" cy="13" rx="9" ry="10.5" />
+        <path d="M28 23h8v5h-8z" />
+        <path d="M18 30c4-3 9-3.5 14-3.5s10 .5 14 3.5c3 2 4 5 4.5 9l2.5 34c.2 3-1.5 5-3.5 5s-3.3-1.6-3.6-4L46 46l-1 30c0 6 .5 10 .5 14l-2 63c-.1 3-2 4.5-4.3 4.5s-4-1.6-4-4.4L33.5 94h-3L29 153c0 2.8-1.8 4.4-4 4.4s-4.2-1.5-4.3-4.5l-2-63c0-4 .5-8 .5-14l-1-30-2.4 28c-.3 2.4-1.6 4-3.6 4s-3.7-2-3.5-5l2.5-34c.5-4 1.5-7 4.5-9z" />
+      </g>
     </svg>
   );
 }
 
 /**
  * Live preview of the storefront "Find my size" — DISPLAY ONLY, the same design as ccf-size.js:
- * 1) the card shoppers see on the product page and 2) the "Size advisor" (drawer / phone bottom sheet).
- * Re-draws from the unsaved settings on the page: card words, button style/colour/corners, unit, and the
- * size chart for the Women/Men tab open in the chart editor. The result uses a sample shopper and the
- * backend's maths (POST /api/size-finder/:shop/preview), fetched again ~0.4s after the chart changes.
+ * 1) the button shoppers see on the product page and 2) the "Try it on me"-style sheet with its screens
+ * (avatar base, height & weight, build, creating, result). Re-draws from the unsaved settings: words,
+ * button style/colour/corners, unit, options and the size chart for the Women/Men tab open in the editor.
+ * The result uses a sample shopper and the backend maths (POST /api/size-finder/:shop/preview).
  */
 export const SAMPLE_SHOPPER = {
   women: { heightCm: 162, weightKg: 60 },
   men: { heightCm: 175, weightKg: 72 },
 };
-const VIEWS = [[1, 'Step 1'], [2, 'Step 2'], [3, 'Result']];
+export const VIEWS = [[1, 'Base'], [2, 'Height & weight'], [3, 'Build'], [4, 'Creating'], [5, 'Result']];
 
 export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth, highlight = null }) {
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
   const gender = genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
   const [device, setDevice] = useState('desktop');
-  const [ownView, setOwnView] = useState(3);
+  const [ownView, setOwnView] = useState(5);
   const view = viewProp || ownView;
   const setView = onViewChange || setOwnView;
   const t = (k, size) => advisorText(settings.texts, k, size);
@@ -143,145 +162,163 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shop, gender, chartKey]);
 
-  const sizes = chart.length ? chart.map((r) => String(r.size)) : ['S', 'M', 'L'];
-  const lengthText = (v) => (hUnit === 'ft' ? `${Math.round((v / CM_PER_IN) * 10) / 10} in` : `${v} cm`);
-  const heightPct = ((sample.heightCm - 140) / (200 - 140)) * 100;
-  const weightPct = ((sample.weightKg - 40) / (130 - 40)) * 100;
-  const hParts = hUnit === 'cm' ? [String(sample.heightCm), 'cm'] : [heightLabel(sample.heightCm, 'ft'), ''];
-  const wParts = wUnit === 'kg' ? [String(sample.weightKg), 'kg'] : [String(Math.round(sample.weightKg / KG_PER_LB)), 'lb'];
-  const ctaClass = `sfp-cta${settings.buttonStyle === 'outline' ? ' is-outline' : settings.buttonStyle === 'soft' ? ' is-soft' : ''}`;
-  const good = result && !result.outOfRange;
-  const C = 2 * Math.PI * 60;
+  const chartSizes = chart.map((r) => String(r.size));
+  const heightPct = ((sample.heightCm - 140) / (210 - 140)) * 100;
+  const weightPct = ((sample.weightKg - 40) / (140 - 40)) * 100;
+  const style = settings.buttonStyle || 'outline';
+  const label = (g) => (g === 'men' ? t('menLabel') : t('womenLabel'));
 
   const card = !genders.length ? (
-    <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the card.</p>
+    <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the button.</p>
   ) : (
-    <div className={`sfp-card${hl('productTag')}`}>
-      <span className="sfp-icon"><Ruler /></span>
-      <span className="sfp-copy">
-        <span className={`sfp-card-title${hl('cardTitle')}`}>{settings.cardTitle || 'Not sure about your size?'}</span>
-        <span className={`sfp-card-sub${hl('cardText')}`}>{settings.cardText || '3 quick questions · takes 20 seconds'}</span>
+    <div className={`sfp-page${hl('productTag')}`}>
+      <p className="sfp-pagelabel">Size</p>
+      <div className="sfp-pills" aria-hidden="true">{['S', 'M', 'L'].map((s) => <span key={s} className={s === 'M' ? 'on' : ''}>{s}</span>)}</div>
+      <span
+        className={`sfp-trigger is-${style}${hl('buttonText', 'accentColor', 'buttonStyle', 'buttonRadius')}`}
+        style={{ borderRadius: ctaRadius(settings.buttonRadius) }}
+      >
+        <I s={18}>{HANGER}</I>{settings.buttonText || 'Find my ideal size'}
       </span>
-      <span className={ctaClass + hl('buttonText', 'accentColor', 'buttonStyle', 'buttonRadius')} style={{ borderRadius: ctaRadius(settings.buttonRadius) }}>
-        {settings.buttonText || 'Find my size'} →
-      </span>
+      <p className={`sfp-caption${hl('cardText')}`}>{settings.cardText || '3 quick questions · takes 20 seconds'}</p>
+      <span className="sfp-addcart">Add to cart</span>
     </div>
   );
 
-  const drawer = genders.length > 0 && (
-    <div className="sfp-drawer">
-      <div className="sfp-grab" />
-      <div className="sfp-dtop"><span className={`sfp-brand${hl('advisorTitle')}`}>{t('advisorTitle')}</span><span className="sfp-x" aria-hidden="true">×</span></div>
-      <div className="sfp-scroll">
-        <div className="sfp-product"><span className="sfp-thumb" /><span><b>Cotton Kurta</b><small>₹1,299</small></span></div>
-        <div className="sfp-progress" aria-hidden="true">{[1, 2, 3].map((i) => <span key={i} className={i <= view ? 'on' : ''} />)}</div>
-        <p className="sfp-stepline"><span className="sfp-step">Step {view} of 3</span> · {STEP_NAMES[view]}</p>
+  const stepper = (n) => (
+    <div className="sfp-stepper" aria-hidden="true">
+      {[1, 2, 3, 4].map((i) => (
+        <span key={i} className="sfp-stepwrap">
+          <span className={`sfp-dot${i < n ? ' is-done' : i === n ? ' is-on' : ''}`}>{i < n ? <I s={10} w={2.6}>{CHECK}</I> : i}</span>
+          {i < 4 && <span className={`sfp-line${i < n ? ' is-done' : ''}`} />}
+        </span>
+      ))}
+    </div>
+  );
+  const privacy = (
+    <p className={`sfp-privacy${hl('privacyText')}`}>
+      <I s={11} w={2}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></I>{t('privacyText')}
+    </p>
+  );
+  const rows = result ? sizeRows(chartSizes, result.size) : [];
 
+  const sheet = genders.length > 0 && (
+    <div className="sfp-sheet">
+      <div className="sfp-grab" />
+      <div className="sfp-head">
+        <span className="sfp-hicon">{(view === 2 || view === 3) && <I s={14} w={2}><path d="M15 6l-6 6 6 6" /></I>}</span>
+        <span className={`sfp-htitle${hl('advisorTitle')}`}>{t('advisorTitle')}</span>
+        <span className="sfp-hicon">×</span>
+      </div>
+      <div className="sfp-body">
         {view === 1 && (
           <>
+            {stepper(1)}
             <p className={`sfp-title${hl('step1Title')}`}>{t('step1Title')}</p>
             <p className={`sfp-lede${hl('step1Text')}`}>{t('step1Text')}</p>
-            {genders.length > 1 && (
-              <div className="sfp-seg">
-                {genders.map((g) => <span key={g} className={(gender === g ? 'on' : '') + hl(g === 'men' ? 'menLabel' : 'womenLabel', 'chart')}>{g === 'men' ? t('menLabel') : t('womenLabel')}</span>)}
-              </div>
-            )}
-            <div className="sfp-measure">
-              <div className="sfp-figure"><Figure heightCm={sample.heightCm} weightKg={sample.weightKg} /></div>
-              <div className="sfp-fields">
-                <div className="sfp-field">
-                  <div className="sfp-flabel"><span>Height</span><span className={`sfp-unit${hl('unit')}`}><span className={hUnit === 'cm' ? 'on' : ''}>cm</span><span className={hUnit === 'ft' ? 'on' : ''}>ft/in</span></span></div>
-                  <div className="sfp-value">{hParts[0]}{hParts[1] && <small>{hParts[1]}</small>}</div>
-                  <div className="sfp-ctrl"><i>−</i><div className="sfp-track"><span style={{ width: `${heightPct}%` }} /><b style={{ left: `${heightPct}%` }} /></div><i>+</i></div>
+            <div className="sfp-figure"><Mannequin heightCm={170} weightKg={64} h={110} /></div>
+            <div className="sfp-rows">
+              {['men', 'women'].filter((g) => genders.includes(g)).map((g) => (
+                <div key={g} className={`sfp-row${g === gender ? ' is-on' : ''}${hl(g === 'men' ? 'menLabel' : 'womenLabel', 'chart')}`}>
+                  <span className="sfp-ricon"><I s={13}>{g === 'men' ? <><circle cx="10" cy="14" r="5" /><path d="M14 10l6-6M15 4h5v5" /></> : <><circle cx="12" cy="9" r="5" /><path d="M12 14v7M9 18h6" /></>}</I></span>
+                  <span className="sfp-rlabel">{label(g)}</span>
+                  <span className="sfp-rchev">›</span>
                 </div>
-                <div className="sfp-field">
-                  <div className="sfp-flabel"><span>Weight</span><span className={`sfp-unit${hl('unit')}`}><span className={wUnit === 'kg' ? 'on' : ''}>kg</span><span className={wUnit === 'lb' ? 'on' : ''}>lb</span></span></div>
-                  <div className="sfp-value">{wParts[0]}<small>{wParts[1]}</small></div>
-                  <div className="sfp-ctrl"><i>−</i><div className="sfp-track"><span style={{ width: `${weightPct}%` }} /><b style={{ left: `${weightPct}%` }} /></div><i>+</i></div>
-                </div>
-              </div>
+              ))}
             </div>
-            {opt.liveEstimate && (
-              <div className={`sfp-live${hl('liveEstimate')}`}>
-                <span><b>Live estimate</b><small>Refines in the next steps</small></span>
-                <span className="sfp-live-size">{result ? result.size : '—'}</span>
-              </div>
-            )}
           </>
         )}
 
         {view === 2 && (
           <>
+            {stepper(2)}
             <p className={`sfp-title${hl('step2Title')}`}>{t('step2Title')}</p>
             <p className={`sfp-lede${hl('step2Text')}`}>{t('step2Text')}</p>
-            <p className="sfp-q">Body shape</p>
-            <div className="sfp-cards">
-              {SHAPES.map(([v, l, h]) => <span key={v} className={v === 'average' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
-            </div>
-            <p className="sfp-q">Preferred fit</p>
-            <div className="sfp-cards">
-              {FITS.map(([v, l, h]) => <span key={v} className={v === 'regular' ? 'on' : ''}><b>{l}</b><small>{h}</small></span>)}
-            </div>
-            {opt.rememberSize && (
-              <div className={`sfp-check${hl('rememberSize')}`}>
-                <span><b>Remember my size</b><small>We save only the size, never your height or weight.</small></span>
-                <i className="sfp-switch" aria-hidden="true" />
+            <div className="sfp-figure is-small"><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={70} /></div>
+            {[['Height', heightLabel(sample.heightCm, hUnit), heightPct, hUnit === 'ft' ? ['4′ 7″', '6′ 11″'] : ['140 cm', '210 cm'], [['cm', 'cm'], ['ft', 'ft']], hUnit],
+              ['Weight', weightLabel(sample.weightKg, wUnit), weightPct, wUnit === 'lb' ? ['88 lb', '309 lb'] : ['40 kg', '140 kg'], [['kg', 'kg'], ['lb', 'lb']], wUnit]].map(([name, val, pct, mm, units, cur]) => (
+              <div key={name} className="sfp-field">
+                <div className="sfp-frow">
+                  <span className="sfp-flabel">{name}<span className={`sfp-units${hl('unit')}`}>{units.map(([u, l]) => <span key={u} className={u === cur ? 'on' : ''}>{l}</span>)}</span></span>
+                  <span className="sfp-fval">{val}</span>
+                </div>
+                <div className="sfp-track"><span style={{ width: `${pct}%` }} /><b style={{ left: `${pct}%` }} /></div>
+                <div className="sfp-minmax"><span>{mm[0]}</span><span>{mm[1]}</span></div>
               </div>
+            ))}
+            {opt.liveEstimate && (
+              <div className={`sfp-live${hl('liveEstimate')}`}><span>Likely size <b>{result ? result.size : '—'}</b></span></div>
             )}
           </>
         )}
 
         {view === 3 && (
-          <div className="sfp-result">
-            <p className={`sfp-title${hl('resultTitle')}`}>{t('resultTitle')}</p>
+          <>
+            {stepper(3)}
+            <p className={`sfp-title${hl('step3Title')}`}>{t('step3Title')}</p>
+            <p className={`sfp-lede${hl('step3Text')}`}>{t('step3Text')}</p>
+            <div className="sfp-builds">
+              {BUILDS.map(([v, l, hint, sx]) => (
+                <div key={v} className={`sfp-build${v === 'average' ? ' on' : ''}`}>
+                  <span className="sfp-bfig"><Mannequin heightCm={170} weightKg={22 * 2.89 * sx} h={34} /></span>
+                  <span className="sfp-bcopy"><b>{l}</b><small>{hint}</small></span>
+                  {v === 'average' && <span className="sfp-bcheck"><I s={9} w={2.6}>{CHECK}</I></span>}
+                </div>
+              ))}
+            </div>
+            {opt.rememberSize && (
+              <div className={`sfp-check${hl('rememberSize')}`}>
+                <span><b>Remember my size</b><small>We save only the size, never your height or weight.</small></span>
+                <i className="sfp-box" aria-hidden="true" />
+              </div>
+            )}
+          </>
+        )}
+
+        {view === 4 && (
+          <div className="sfp-creating">
+            <div className="sfp-shirt"><I s={22} w={1.6}><path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z" /></I></div>
+            <p className={`sfp-title${hl('creatingTitle')}`}>{t('creatingTitle')}</p>
+            <div className="sfp-stage2"><span className="sfp-pedestal" /><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={140} /></div>
+            <div className="sfp-bar"><span /></div>
+            <p className="sfp-status">Generating…</p>
+          </div>
+        )}
+
+        {view === 5 && (
+          <>
+            <p className="sfp-change">‹ Change my avatar</p>
             {error && <p className="sfp-err" role="alert">{error}</p>}
             {!error && !result && <p className="sfp-muted sfp-loading">{loading ? 'Working out the size…' : 'Add sizes to this chart to see a result.'}</p>}
             {!error && result && (
               <>
-                <div className={`sfp-ring${hl('chart')}`}>
-                  <svg width="112" height="112" viewBox="0 0 132 132" aria-hidden="true">
-                    <circle cx="66" cy="66" r="60" fill="none" stroke="#EEECE8" strokeWidth="6" />
-                    <circle cx="66" cy="66" r="60" fill="none" stroke={good ? '#2F6B4F' : '#B7791F'} strokeWidth="6" strokeLinecap="round"
-                      strokeDasharray={C.toFixed(1)} strokeDashoffset={(good ? 0 : C * 0.3).toFixed(1)} transform="rotate(-90 66 66)" />
-                  </svg>
-                  <div className="sfp-size" aria-label="Recommended size">{result.size}</div>
-                  <span className="sfp-ring-label">{good ? 'Best fit' : 'Closest fit'}</span>
-                </div>
-                <p className="sfp-verdict">
-                  {result.outOfRange
-                    ? `${result.size} is our largest size — it may feel tight. Check the size chart below.`
-                    : `${result.size} lines up best with your measurements and the fit you chose.`}
-                </p>
-                {(result.reasons || []).map((x) => (
-                  <div key={x.area} className={`sfp-reason${x.status === 'info' ? ' is-info' : x.status === 'right' ? '' : ' is-warn'}`}>
-                    <span>{x.area.charAt(0).toUpperCase() + x.area.slice(1)}</span>
-                    {x.status === 'info'
-                      ? <span className="sfp-muted">Garment length {lengthText(x.value)}</span>
-                      : <span className={x.status === 'right' ? 'sfp-ok' : 'sfp-bad'}>{REASON_TEXT[x.status]}</span>}
+                <div className="sfp-result">
+                  <div className="sfp-avatar"><Mannequin heightCm={sample.heightCm} weightKg={sample.weightKg} h={150} /><span className="sfp-wear" /></div>
+                  <div>
+                    <div className="sfp-prod"><span className="sfp-thumb" /><span><b>Cotton Kurta</b><small>₹1,299</small></span></div>
+                    <p className={`sfp-rtitle${hl('resultTitle')}`}>{t('resultTitle')}</p>
+                    <div className={`sfp-sizes${hl('chart')}`}>
+                      {rows.map((r) => (
+                        <div key={r.size} className={`sfp-size${r.rec ? ' is-rec' : ''}`}>
+                          <b aria-label={r.rec ? 'Recommended size' : undefined}>{r.size}</b><small>{r.note}</small>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-                <div className={`sfp-strip${hl('chart')}`} aria-hidden="true">
-                  {sizes.map((s) => <span key={s} className={s === String(result.size) ? 'is-you' : ''}>{s}</span>)}
                 </div>
-                <div className="sfp-meter" aria-hidden="true">
-                  <div className="sfp-meter-bar"><span style={{ left: `${meterPosition(result.reasons)}%` }} /></div>
-                  <div className="sfp-meter-labels"><span>Snug</span><span>Just right</span><span>Roomy</span></div>
-                </div>
+                {result.outOfRange && <p className="sfp-note">{result.size} is the largest size in the chart — it may feel tight.</p>}
                 <div className="sfp-links">{opt.sizeChart && <span className={hl('sizeChart').trim()}>View size chart</span>}<span>Edit details</span></div>
               </>
             )}
-          </div>
+          </>
         )}
       </div>
       <div className="sfp-foot">
-        {view === 1 && <span className="sfp-main">Continue →</span>}
-        {view === 2 && <div className="sfp-actions"><span className="sfp-ghost">Back</span><span className="sfp-main">See my size</span></div>}
-        {view === 3 && (result
-          ? (opt.addToBag
-            ? <div className={`sfp-actions${hl('addToBag')}`}><span className="sfp-ghost">Select {result.size}</span><span className={`sfp-main${hl('addToBagText')}`}>{t('addToBagText', result.size)}</span></div>
-            : <span className={`sfp-main${hl('addToBag')}`}>Select size {result.size}</span>)
-          : <span className="sfp-main">Close</span>)}
-        {view === 1 && <p className="sfp-privacy">Used only to work out your size — never saved by the store.</p>}
+        {(view === 2 || view === 3) && <span className="sfp-main">Continue</span>}
+        {view === 5 && result && (opt.addToBag
+          ? <><span className={`sfp-main${hl('addToBag', 'addToBagText')}`}>{t('addToBagText', result.size)}</span><span className="sfp-ghost">Just select size {result.size}</span></>
+          : <span className={`sfp-main${hl('addToBag')}`}>Select size {result.size}</span>)}
+        {view <= 3 && privacy}
       </div>
     </div>
   );
@@ -295,7 +332,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
           <p className="sfp-muted">
             {highlight && highlight.label ? <span className="sfp-editing" data-testid="preview-editing"><i aria-hidden="true" />Editing: {highlight.label}</span> : null}
             {highlight && highlight.label ? ' · ' : null}
-            {show === 'card' ? 'Showing the card you are editing' : show === 'advisor' ? 'Showing the size preview you are editing' : 'View only · updates as you edit, before you save'}
+            {show === 'card' ? 'Showing the button you are editing' : show === 'advisor' ? 'Showing the size preview you are editing' : 'View only · updates as you edit, before you save'}
             {show !== 'both' && onShowBoth && (
               <> · <button type="button" className="sfp-both" onClick={onShowBoth}>Show both</button></>
             )}
@@ -310,7 +347,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
       <div className={`sfp-stage${device === 'mobile' ? ' is-mobile' : ''}`}>
         {show !== 'advisor' && (
         <div className="sfp-block">
-          <p className="sfp-blocktitle"><span>1</span>Card on the product page</p>
+          <p className="sfp-blocktitle"><span>1</span>Button on the product page</p>
           {/* Display only: inert = no clicks, no keyboard focus inside the previews. */}
           <div className="sfp-cardbox sfp-static" data-testid="preview-card" {...{ inert: '' }}>{card}</div>
         </div>
@@ -327,21 +364,21 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             </div>
           </div>
           <div className="sfp-frame sfp-static" data-testid="preview-frame" {...{ inert: '' }}>
-            {drawer || <p className="sfp-warn">Add a size chart to see the size preview.</p>}
+            {sheet || <p className="sfp-warn">Add a size chart to see the size preview.</p>}
           </div>
         </div>
         )}
       </div>
       <p className="sfp-sample">
-        Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, average shape, regular fit.
+        Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, balanced build.
       </p>
     </section>
   );
 }
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-.sfp{font-family:Inter,-apple-system,BlinkMacSystemFont,'San Francisco','Segoe UI',Roboto,'Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;background:#fff;border:1px solid #E3E3E3;border-radius:14px;padding:16px;color:#1A1A1A;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+.sfp{font-family:Inter,-apple-system,BlinkMacSystemFont,'San Francisco','Segoe UI',Roboto,'Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;background:#fff;border:1px solid #E3E3E3;border-radius:14px;padding:16px;color:#111;box-shadow:0 1px 3px rgba(0,0,0,.05)}
 .sfp *{box-sizing:border-box}
 .sfp p{margin:0}
 .sfp button{font-family:inherit}
@@ -349,127 +386,121 @@ const CSS = `
 .sfp-label{font-weight:600;font-size:14px}
 .sfp-muted{font-size:12px;color:#6B6B6B}
 .sfp-dev,.sfp-views{display:inline-flex;background:#F1F1F1;border-radius:8px;padding:3px;flex-shrink:0}
-.sfp-views{margin:0 0 12px;flex-wrap:wrap}
-.sfp-dev button,.sfp-views button{border:0;background:transparent;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:500;color:#616161;cursor:pointer}
-.sfp-dev button[aria-pressed="true"],.sfp-views button[aria-pressed="true"]{background:#fff;color:#1A1A1A;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.sfp-views{flex-wrap:wrap}
+.sfp-dev button,.sfp-views button{border:0;background:transparent;border-radius:6px;padding:5px 9px;font-size:11.5px;font-weight:500;color:#616161;cursor:pointer}
+.sfp-dev button[aria-pressed="true"],.sfp-views button[aria-pressed="true"]{background:#fff;color:#111;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .sfp-both{background:none;border:0;padding:0;font-size:12px;font-weight:600;color:#303030;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .sfp-sample{font-size:12px;color:#8A8A8A;margin:10px 2px 0}
-
-/* two previews */
 .sfp-stage{display:flex;flex-direction:column;gap:14px}
-.sfp-block{background:#F4F2EE;border-radius:12px;padding:14px}
+.sfp-block{background:#F4F4F2;border-radius:12px;padding:14px}
 .sfp-blockhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
 .sfp-blocktitle{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:#303030;margin:0 0 10px}
 .sfp-blockhead .sfp-blocktitle{margin:0}
 .sfp-blocktitle span{width:20px;height:20px;border-radius:50%;background:#303030;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
 .sfp-cardbox{background:#fff;border-radius:10px;padding:14px;max-width:440px;margin:0 auto}
-.sfp-frame{max-width:400px;margin:0 auto;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.10);border:1px solid #E7E5E0;background:#fff}
+.sfp-frame{max-width:380px;margin:0 auto;border-radius:20px;overflow:hidden;box-shadow:0 18px 40px rgba(0,0,0,.14);border:1px solid #E7E7E5;background:#fff}
 .sfp-stage.is-mobile .sfp-cardbox{max-width:340px}
-.sfp-stage.is-mobile .sfp-frame{max-width:340px;border-radius:18px 18px 0 0}
-.sfp-stage.is-mobile .sfp-grab{display:block;width:34px;height:4px;border-radius:4px;background:#D9D6D0;margin:7px auto 0}
+.sfp-stage.is-mobile .sfp-frame{max-width:330px;border-radius:20px 20px 0 0}
+.sfp-stage.is-mobile .sfp-grab{display:block;width:34px;height:4px;border-radius:4px;background:#D1D5DB;margin:7px auto 0}
 .sfp-static{pointer-events:none;user-select:none}
 .sfp .is-hl{outline:1px dashed #A5B4FC;outline-offset:2px;border-radius:6px;animation:sfp-hl 1.2s ease-in-out infinite}
 @keyframes sfp-hl{0%,100%{outline-color:#4F46E5}50%{outline-color:#C7D2FE}}
-.sfp .sfp-seg span.is-hl{outline-offset:-4px;border-radius:2px}
-.sfp .sfp-seg span.on.is-hl{animation-name:sfp-hl-on}
-@keyframes sfp-hl-on{0%,100%{outline-color:#FFFFFF}50%{outline-color:#818CF8}}
-.sfp .sfp-seg span.on.is-hl{outline-color:#E0E7FF}
 @media (prefers-reduced-motion:reduce){.sfp .is-hl{animation:none}}
 .sfp-editing{display:inline-flex;align-items:center;gap:5px;color:#4338CA;font-weight:600}
 .sfp-editing i{width:7px;height:7px;border-radius:50%;background:#4F46E5;box-shadow:0 0 0 3px rgba(79,70,229,.2)}
 .sfp-warn{font-size:12px;color:#B45309;background:#FFFBEB;border-radius:8px;padding:8px 10px}
 
-/* size card on the page */
-.sfp-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--sfp-accent) 25%,transparent);border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--sfp-accent) 6%,#fff),color-mix(in srgb,var(--sfp-accent) 2%,#fff))}
-.sfp-icon{width:40px;height:40px;border-radius:50%;background:#fff;color:var(--sfp-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px color-mix(in srgb,var(--sfp-accent) 20%,transparent)}
-.sfp-copy{flex:1;min-width:140px;display:flex;flex-direction:column;gap:1px}
-.sfp-card-title{font-size:14px;font-weight:600;line-height:1.3}
-.sfp-card-sub{font-size:12px;color:#6B6B6B}
-.sfp-cta{flex-shrink:0;background:var(--sfp-accent);color:#fff;border:1px solid var(--sfp-accent);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;white-space:nowrap}
-.sfp-cta.is-outline{background:#fff;color:var(--sfp-accent)}
-.sfp-cta.is-soft{background:color-mix(in srgb,var(--sfp-accent) 12%,#fff);border-color:transparent;color:var(--sfp-accent)}
+/* product page */
+.sfp-page{display:flex;flex-direction:column;gap:8px}
+.sfp-pagelabel{font-size:12px;color:#4B5563}
+.sfp-pills{display:flex;gap:6px}
+.sfp-pills span{min-width:40px;text-align:center;padding:7px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px}
+.sfp-pills span.on{border-color:#111;box-shadow:inset 0 0 0 1px #111}
+.sfp-trigger{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 14px;border:1.5px solid var(--sfp-accent);background:#fff;color:var(--sfp-accent);font-size:13.5px;font-weight:600}
+.sfp-trigger.is-filled{background:var(--sfp-accent);color:#fff}
+.sfp-trigger.is-soft{background:var(--sfp-tint);border-color:transparent}
+.sfp-caption{font-size:11.5px;color:#6B7280;text-align:center;margin:-2px 0 0 !important}
+.sfp-addcart{display:block;text-align:center;padding:10px;border-radius:6px;background:#111;color:#fff;font-size:13px;font-weight:600;opacity:.85}
 
-/* drawer */
-.sfp-drawer{display:flex;flex-direction:column;background:#fff;font-size:12.5px}
+/* sheet */
+.sfp-sheet{display:flex;flex-direction:column;background:#fff;font-size:12.5px}
 .sfp-grab{display:none}
-.sfp-dtop{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid #EEECE8}
-.sfp-brand{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
-.sfp-x{font-size:18px;line-height:1}
-.sfp-scroll{flex:1;padding:0 16px 8px}
-.sfp-product{display:flex;align-items:center;gap:10px;background:#F7F6F3;border-radius:6px;padding:8px;margin:12px 0 0}
-.sfp-thumb{width:32px;height:32px;border-radius:4px;background:#E2DFD9;flex-shrink:0}
-.sfp-product b{display:block;font-size:12px;font-weight:600}
-.sfp-product small{font-size:11px;color:#6B6B6B}
-.sfp-progress{display:flex;gap:4px;margin:12px 0 5px}
-.sfp-progress span{flex:1;height:3px;border-radius:2px;background:#E7E5E0}
-.sfp-progress span.on{background:#1A1A1A}
-.sfp-stepline{font-size:10.5px;color:#6B6B6B}
-.sfp-title{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:12px 0 2px !important}
-.sfp-lede{font-size:11.5px;color:#6B6B6B;margin:0 0 12px !important}
-.sfp-seg{display:flex;border:1px solid #1A1A1A;border-radius:4px;overflow:hidden;margin:0 0 12px}
-.sfp-seg span{flex:1;text-align:center;padding:7px 4px;font-size:9.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
-.sfp-seg span.on{background:#1A1A1A;color:#fff}
-.sfp-measure{display:flex;gap:10px}
-.sfp-figure{width:46px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#1A1A1A}
-.sfp-fields{flex:1;min-width:0}
-.sfp-field{margin:0 0 10px}
-.sfp-flabel{display:flex;justify-content:space-between;align-items:center;margin:0 0 2px}
-.sfp-flabel > span:first-child{font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#6B6B6B}
-.sfp-unit{display:inline-flex;gap:2px}
-.sfp-unit > span{border:1px solid #E1DED8;border-radius:3px;padding:1px 5px;font-size:9px;font-weight:600;text-transform:uppercase;color:#6B6B6B}
-.sfp-unit > span.on{background:#1A1A1A;border-color:#1A1A1A;color:#fff}
-.sfp-value{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1.15;margin:0 0 4px}
-.sfp-value small{font-size:11px;font-weight:500;color:#6B6B6B;margin-left:2px}
-.sfp-ctrl{display:flex;align-items:center;gap:6px}
-.sfp-ctrl i{width:18px;height:18px;border:1px solid #E1DED8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px;flex-shrink:0}
-.sfp-track{position:relative;flex:1;height:3px;border-radius:3px;background:#E3E0DA}
-.sfp-track > span{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:#1A1A1A}
-.sfp-track > b{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#1A1A1A}
-.sfp-live{display:flex;align-items:center;justify-content:space-between;border:1px solid #E7E5E0;border-radius:6px;padding:9px 11px;margin:2px 0 6px}
-.sfp-live b{display:block;font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
-.sfp-live small{font-size:10.5px;color:#6B6B6B}
-.sfp-live-size{font-size:19px;font-weight:600}
-.sfp-q{font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#6B6B6B;margin:0 0 6px !important}
-.sfp-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 12px}
-.sfp-cards > span{border:1px solid #E1DED8;border-radius:6px;padding:8px 4px;text-align:center;display:flex;flex-direction:column;gap:1px}
-.sfp-cards > span.on{border:1.5px solid #1A1A1A;background:#F7F6F3}
-.sfp-cards b{font-size:12px;font-weight:600}
-.sfp-cards small{font-size:9.5px;color:#6B6B6B}
-.sfp-check{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#F7F6F3;border-radius:6px;padding:9px 11px}
-.sfp-check b{display:block;font-size:11.5px;font-weight:600}
-.sfp-check small{font-size:10px;color:#6B6B6B}
-.sfp-switch{display:inline-block;width:32px;height:18px;border-radius:999px;background:#D1CEC7;position:relative;flex-shrink:0}
-.sfp-switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
-.sfp-result{text-align:center}
-.sfp-ring{position:relative;width:112px;height:112px;margin:6px auto 10px;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.sfp-ring svg{position:absolute;inset:0}
-.sfp-size{font-size:34px;font-weight:600;line-height:1;letter-spacing:-.02em}
-.sfp-ring-label{font-size:10.5px;color:#6B6B6B;margin-top:3px}
-.sfp-verdict{font-size:11.5px;background:#F7F6F3;border-radius:6px;padding:9px 11px;margin:0 0 8px !important;text-align:left}
-.sfp-reason{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;background:#F7F6F3;border-left:3px solid #2F6B4F;border-radius:0 6px 6px 0;padding:7px 10px;margin:0 0 5px;text-align:left}
-.sfp-reason.is-warn{border-left-color:#B7791F}
-.sfp-reason.is-info{border-left-color:#C9C5BD}
-.sfp-reason > span:first-child{font-weight:600}
-.sfp-ok,.sfp-bad{display:inline-flex;align-items:center;gap:6px}
-.sfp-ok::before,.sfp-bad::before{content:"";width:6px;height:6px;border-radius:50%}
-.sfp-ok::before{background:#2F6B4F}.sfp-bad::before{background:#B7791F}
-.sfp-strip{display:flex;justify-content:center;gap:4px;margin:18px 0 2px;flex-wrap:wrap}
-.sfp-strip span{position:relative;min-width:30px;padding:5px 4px;border:1px solid #E1DED8;border-radius:4px;font-size:10.5px;font-weight:600}
-.sfp-strip span.is-you{background:#1A1A1A;border-color:#1A1A1A;color:#fff}
-.sfp-strip span.is-you::before{content:"YOU";position:absolute;left:50%;top:-14px;transform:translateX(-50%);font-size:8px;letter-spacing:.14em;color:#1A1A1A}
-.sfp-meter{margin:12px 0 2px;text-align:left}
-.sfp-meter-bar{position:relative;height:3px;border-radius:3px;background:linear-gradient(90deg,#E8D9B5,#2F6B4F 50%,#E8D9B5)}
-.sfp-meter-bar span{position:absolute;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;background:#fff;border:2.5px solid #1A1A1A}
-.sfp-meter-labels{display:flex;justify-content:space-between;font-size:9.5px;color:#6B6B6B;margin-top:4px}
+.sfp-head{display:grid;grid-template-columns:26px 1fr 26px;align-items:center;padding:11px 12px 4px}
+.sfp-hicon{display:flex;align-items:center;justify-content:center;font-size:17px;line-height:1;color:#111}
+.sfp-htitle{text-align:center;font-size:12.5px;font-weight:600}
+.sfp-body{padding:2px 18px 6px}
+.sfp-stepper{display:flex;justify-content:center;margin:2px 0 10px}
+.sfp-stepwrap{display:inline-flex;align-items:center}
+.sfp-dot{width:20px;height:20px;border-radius:50%;border:1.5px solid #D1D5DB;color:#9CA3AF;font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;background:#fff}
+.sfp-dot.is-on,.sfp-dot.is-done{border-color:#111;background:#111;color:#fff}
+.sfp-line{width:26px;height:1.5px;background:#E5E7EB}
+.sfp-line.is-done{background:#111}
+.sfp-title{text-align:center;font-size:16px;font-weight:650;letter-spacing:-.01em;line-height:1.25}
+.sfp-lede{text-align:center;font-size:11.5px;color:#6B7280;margin:3px 0 0 !important}
+.sfp-figure{display:flex;justify-content:center;align-items:flex-end;margin:10px auto 6px}
+.sfp-figure.is-small{margin:6px auto 2px}
+.sfp-rows{border-top:1px solid #F0F0F0;margin-top:6px}
+.sfp-row{display:flex;align-items:center;gap:10px;padding:11px 2px;border-bottom:1px solid #F0F0F0;font-size:13px;font-weight:500}
+.sfp-row.is-on{font-weight:650}
+.sfp-ricon{width:28px;height:28px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center}
+.sfp-rlabel{flex:1}
+.sfp-rchev{color:#9CA3AF;font-size:16px}
+.sfp-field{margin:10px 0 4px}
+.sfp-frow{display:flex;justify-content:space-between;align-items:center}
+.sfp-flabel{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600}
+.sfp-units{display:inline-flex;gap:1px}
+.sfp-units span{padding:1px 5px;border-radius:5px;font-size:10px;color:#9CA3AF}
+.sfp-units span.on{background:#F3F4F6;color:#111;font-weight:600}
+.sfp-fval{font-size:12.5px;font-weight:650;padding:3px 8px;border:1px solid #E5E7EB;border-radius:7px;min-width:62px;text-align:center}
+.sfp-track{position:relative;height:3px;border-radius:3px;background:#E5E7EB;margin:12px 0 6px}
+.sfp-track > span{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:#111}
+.sfp-track > b{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#111;border:3px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.sfp-minmax{display:flex;justify-content:space-between;font-size:9.5px;color:#9CA3AF}
+.sfp-live{display:flex;justify-content:center;margin:8px 0 2px}
+.sfp-live span{font-size:11px;color:#374151;background:#F3F4F6;border-radius:999px;padding:4px 10px}
+.sfp-live b{font-size:12px;color:#111}
+.sfp-builds{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}
+.sfp-build{position:relative;display:flex;align-items:center;gap:7px;padding:9px;border:1.5px solid #E5E7EB;border-radius:11px}
+.sfp-build.on{border-color:#111;box-shadow:0 0 0 1px #111}
+.sfp-bfig{width:18px;display:flex;justify-content:center}
+.sfp-bcopy{display:flex;flex-direction:column;min-width:0}
+.sfp-bcopy b{font-size:12px}
+.sfp-bcopy small{font-size:9.5px;color:#6B7280;line-height:1.25}
+.sfp-bcheck{position:absolute;top:6px;right:6px;width:15px;height:15px;border-radius:50%;background:#111;color:#fff;display:flex;align-items:center;justify-content:center}
+.sfp-check{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#F9FAFB;border-radius:10px;padding:8px 10px;margin-top:10px}
+.sfp-check b{display:block;font-size:11.5px}
+.sfp-check small{font-size:9.5px;color:#6B7280}
+.sfp-box{width:14px;height:14px;border:1.5px solid #9CA3AF;border-radius:4px;flex-shrink:0}
+.sfp-creating{text-align:center;padding:6px 0 4px}
+.sfp-shirt{display:flex;justify-content:center;margin-bottom:4px}
+.sfp-stage2{position:relative;display:flex;justify-content:center;align-items:flex-end;height:150px;margin:8px 0 4px}
+.sfp-stage2 svg{position:relative;z-index:1}
+.sfp-pedestal{position:absolute;bottom:-4px;left:50%;width:130px;height:24px;margin-left:-65px;border-radius:50%;border:1.5px solid #D1D5DB;background:radial-gradient(ellipse at center,#F3F4F6 0,#fff 70%)}
+.sfp-bar{height:3px;border-radius:3px;background:#E5E7EB;overflow:hidden;margin:12px 0 6px}
+.sfp-bar span{display:block;height:100%;width:60%;background:#111}
+.sfp-status{font-size:11px;color:#6B7280}
+.sfp-change{font-size:11.5px;font-weight:600;margin:2px 0 6px !important}
+.sfp-result{display:grid;grid-template-columns:40% 1fr;gap:10px}
+.sfp-avatar{position:relative;border-radius:12px;background:linear-gradient(180deg,#F5F5F4,#ECECEA);display:flex;align-items:flex-end;justify-content:center;min-height:170px;padding-top:8px;overflow:hidden}
+.sfp-wear{position:absolute;left:50%;top:26%;width:52%;height:34%;transform:translateX(-50%);border-radius:8px;background:linear-gradient(135deg,#E9E4DA,#CFC6B8);box-shadow:0 4px 12px rgba(0,0,0,.16)}
+.sfp-prod{display:flex;gap:7px;align-items:center;padding-bottom:7px;border-bottom:1px solid #F0F0F0}
+.sfp-thumb{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,#E9E4DA,#D8D0C2);flex-shrink:0}
+.sfp-prod b{display:block;font-size:11.5px}
+.sfp-prod small{font-size:10.5px;color:#6B7280}
+.sfp-rtitle{font-size:11.5px;font-weight:650;margin:8px 0 6px !important}
+.sfp-sizes{display:flex;flex-direction:column;gap:5px}
+.sfp-size{display:flex;align-items:center;justify-content:space-between;padding:7px 9px;border:1.5px solid #E5E7EB;border-radius:9px}
+.sfp-size b{font-size:12px}
+.sfp-size small{font-size:9.5px;color:#6B7280}
+.sfp-size.is-rec{border-color:#22C55E;background:#F0FDF4;box-shadow:0 0 0 1px #16A34A}
+.sfp-size.is-rec small{color:#15803D;font-weight:650}
+.sfp-note{font-size:10.5px;color:#6B7280;margin:8px 0 0 !important}
 .sfp-links{display:flex;justify-content:center;gap:16px;margin:10px 0 2px}
-.sfp-links span{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;text-decoration:underline;text-underline-offset:3px}
+.sfp-links span{font-size:10.5px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
 .sfp-loading{padding:18px 0;text-align:center}
 .sfp-err{font-size:12px;color:#B42318;font-weight:500;background:#FEF2F2;border-radius:6px;padding:8px 10px;text-align:left}
-.sfp-foot{border-top:1px solid #EEECE8;padding:10px 16px 12px}
-.sfp-actions{display:flex;gap:6px}
-.sfp-main,.sfp-ghost{display:flex;align-items:center;justify-content:center;border-radius:4px;padding:10px 8px;font-size:12px;font-weight:600;white-space:nowrap}
-.sfp-main{flex:2;background:var(--sfp-accent);color:#fff;border:1px solid var(--sfp-accent)}
-.sfp-ghost{flex:1;border:1px solid #1A1A1A;background:#fff}
-.sfp-privacy{font-size:9.5px;color:#8A867E;text-align:center;margin:6px 0 0 !important}
-
+.sfp-foot{padding:8px 18px 12px}
+.sfp-main{display:flex;align-items:center;justify-content:center;border-radius:11px;padding:11px 8px;font-size:12.5px;font-weight:650;background:#111;color:#fff}
+.sfp-ghost{display:block;text-align:center;margin-top:7px;font-size:11px;font-weight:600;text-decoration:underline;text-underline-offset:3px;color:#374151}
+.sfp-privacy{display:flex;align-items:center;justify-content:center;gap:5px;font-size:9.5px;color:#9CA3AF;margin:8px 0 0 !important}
 `;

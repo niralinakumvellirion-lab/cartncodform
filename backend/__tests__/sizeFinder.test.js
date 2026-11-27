@@ -98,7 +98,7 @@ describe('sanitizeSettings / sanitizeChart', () => {
   test('valid settings, defaults filled', () => {
     const s = S.sanitizeSettings(ok);
     expect(s.enabled).toBe(true);
-    expect(s.buttonText).toBe('Find my size');
+    expect(s.buttonText).toBe('Find my ideal size');
     expect(s.unit).toBe('cm');
     expect(s.charts.women).toHaveLength(6);
     expect(s.charts.men).toEqual([]);
@@ -119,26 +119,49 @@ describe('sanitizeSettings / sanitizeChart', () => {
 
   test('size advisor words and on/off parts: defaults, trimmed, capped, booleans only', () => {
     const d = S.sanitizeSettings(ok);
-    expect(d.texts.womenLabel).toBe('Womenswear');
-    expect(d.texts.addToBagText).toBe('Add size {size} to bag');
+    expect(d.texts.womenLabel).toBe('Woman');
+    expect(d.texts.addToBagText).toBe('Add to cart');
+    expect(d.texts.step3Title).toBe('Choose your build');
+    expect(d.texts.creatingTitle).toBe('Creating your avatar');
+    expect(d.texts.privacyText).toBe('Your data stays private and secure');
     expect(d.options).toEqual({ liveEstimate: true, rememberSize: true, addToBag: true, sizeChart: true });
     const s = S.sanitizeSettings({ ...ok,
       texts: { womenLabel: '  Ladies  ', menLabel: '', step1Text: 'x'.repeat(300), hacker: 'nope' },
       options: { liveEstimate: false, addToBag: 'no', extra: true } });
     expect(s.texts.womenLabel).toBe('Ladies');
-    expect(s.texts.menLabel).toBe('Menswear');
+    expect(s.texts.menLabel).toBe('Man');
     expect(s.texts.step1Text).toHaveLength(90);
     expect(s.texts.hacker).toBeUndefined();
     expect(s.options).toEqual({ liveEstimate: false, rememberSize: true, addToBag: true, sizeChart: true });
     expect(S.publicSettings({ ...ok, texts: { menLabel: 'Gents' } }).texts.menLabel).toBe('Gents');
   });
 
-  test('button style and corner radius: allowed values only, 0–24, defaults filled + round', () => {
+  test('old default words are upgraded to the new ones; the store’s own words are kept', () => {
+    const d = S.withDefaults({ buttonText: 'Find my size', texts: { advisorTitle: 'Size advisor', step1Title: 'Let’s find your fit', resultTitle: 'Your size', menLabel: 'Gents' } });
+    expect(d.buttonText).toBe('Find my ideal size');
+    expect(d.texts.advisorTitle).toBe('Find my size');
+    expect(d.texts.step1Title).toBe('Choose your avatar base');
+    expect(d.texts.resultTitle).toBe('Recommended size');
+    expect(d.texts.menLabel).toBe('Gents');
+    expect(S.withDefaults({ buttonText: 'Check my size' }).buttonText).toBe('Check my size');
+  });
+
+  test('builds: athletic is accepted; it gives a broader chest and a narrower waist than balanced', () => {
+    const a = S.sanitizeAnswers({ gender: 'men', heightCm: 178, weightKg: 79, shape: 'athletic' });
+    expect(a.shape).toBe('athletic');
+    const ath = S.estimateBody(a);
+    const avg = S.estimateBody({ ...a, shape: 'average' });
+    expect(ath.chest).toBeGreaterThan(avg.chest);
+    expect(ath.waist).toBeLessThan(avg.waist);
+    expect(S.sanitizeAnswers({ gender: 'men', heightCm: 178, weightKg: 79, shape: 'giant' }).shape).toBe('average');
+  });
+
+  test('button style and corner radius: allowed values only, 0–24, defaults outline + round', () => {
     const d = S.sanitizeSettings(ok);
-    expect(d.buttonStyle).toBe('filled');
+    expect(d.buttonStyle).toBe('outline');
     expect(d.buttonRadius).toBe(24);
     expect(S.sanitizeSettings({ ...ok, buttonStyle: 'outline', buttonRadius: 8 })).toMatchObject({ buttonStyle: 'outline', buttonRadius: 8 });
-    expect(S.sanitizeSettings({ ...ok, buttonStyle: 'neon', buttonRadius: 99 })).toMatchObject({ buttonStyle: 'filled', buttonRadius: 24 });
+    expect(S.sanitizeSettings({ ...ok, buttonStyle: 'neon', buttonRadius: 99 })).toMatchObject({ buttonStyle: 'outline', buttonRadius: 24 });
     expect(S.sanitizeSettings({ ...ok, buttonRadius: -5 }).buttonRadius).toBe(0);
     expect(S.sanitizeSettings({ ...ok, buttonRadius: 'abc' }).buttonRadius).toBe(24);
     expect(S.publicSettings({ buttonStyle: 'soft', buttonRadius: 0 })).toMatchObject({ buttonStyle: 'soft', buttonRadius: 0 });
