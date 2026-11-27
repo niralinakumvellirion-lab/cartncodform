@@ -11,8 +11,16 @@ const rowSchema = new mongoose.Schema({
   length: { type: Number, default: 0 },
 }, { _id: false });
 
+// Shoes / rings / bangles: one value per size (foot length cm · ring circumference mm · bangle width mm).
+const measureRowSchema = new mongoose.Schema({
+  size:  { type: String, required: true },
+  value: { type: Number, required: true },
+}, { _id: false });
+
 const sizeFinderConfigSchema = new mongoose.Schema({
   shopDomain:  { type: String, required: true, lowercase: true, trim: true },
+  // clothing | shoes | rings | bangles | none. Missing on settings saved before store types = clothing.
+  storeType:   { type: String, enum: ['', 'clothing', 'shoes', 'rings', 'bangles', 'none'] },
   enabled:     { type: Boolean, default: false },
   productTag:  { type: String, default: '' },          // '' = every product with a Size option
   buttonText:  { type: String, default: 'Find my size' },
@@ -27,6 +35,11 @@ const sizeFinderConfigSchema = new mongoose.Schema({
   charts: {
     women: { type: [rowSchema], default: undefined },
     men:   { type: [rowSchema], default: undefined },
+  },
+  measureCharts: {
+    shoes:   { type: [measureRowSchema], default: undefined },
+    rings:   { type: [measureRowSchema], default: undefined },
+    bangles: { type: [measureRowSchema], default: undefined },
   },
   updatedAt:   { type: Date, default: Date.now },
 });

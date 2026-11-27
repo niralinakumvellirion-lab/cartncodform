@@ -51,6 +51,7 @@ const profileSchema = new Schema({
     size:      { type: String, default: null },
     gender:    { type: String, default: null },   // 'women' | 'men'
     fit:       { type: String, default: null },   // 'snug' | 'regular' | 'relaxed'
+    kind:      { type: String, default: null },   // 'clothing' | 'shoes' | 'rings' | 'bangles'
     updatedAt: { type: Date, default: null },
   },
 

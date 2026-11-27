@@ -78,6 +78,12 @@ export function sizeRows(chartSizes, rec) {
 const I = (props) => (
   <svg width={props.s || 14} height={props.s || 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={props.w || 1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{props.children}</svg>
 );
+const TYPE_ICON = {
+  shoes: <><path d="M3 16.5V8.5c0-.8.7-1.5 1.5-1.5H7l2 3.5c.9 1.6 2.6 2.5 4.4 2.5H15l4 1.2c1.2.4 2 1.4 2 2.6v.7H3z" /><path d="M3 19h18" /></>,
+  rings: <><circle cx="12" cy="14.5" r="6" /><path d="M9.5 8.8 8 5.5h8l-1.5 3.3" /><path d="M10 5.5 12 3l2 2.5" /></>,
+  bangles: <><ellipse cx="12" cy="12" rx="8.5" ry="4.5" /><ellipse cx="12" cy="12" rx="5.5" ry="2.6" /></>,
+};
+const SAMPLE_PRODUCT = { shoes: 'Canvas Sneakers', rings: 'Silver Band Ring', bangles: 'Gold-plated Bangle Set' };
 const HANGER = <><path d="M12 6a2 2 0 1 1 2 2c-1 .4-2 1-2 2.2V11" /><path d="M12 11 3.5 17a1.5 1.5 0 0 0 .9 2.7h15.2a1.5 1.5 0 0 0 .9-2.7L12 11z" /></>;
 const CHECK = <path d="M5 12l5 5L20 7" />;
 
@@ -112,14 +118,58 @@ export const SAMPLE_SHOPPER = {
   men: { heightCm: 175, weightKg: 72 },
 };
 export const VIEWS = [[1, 'Base'], [2, 'Height & weight'], [3, 'Build'], [4, 'Creating'], [5, 'Result']];
+export const MEASURE_VIEWS = [[1, 'Measure'], [2, 'Result']];
+const CLOTHING_CAPTION = '3 quick questions · takes 20 seconds';
+/** Value with its unit, without trailing .0 ("25.4 cm", "52 mm"). */
+export function measureLabel(v, unit) {
+  const n = Math.round(Number(v) * 10) / 10;
+  return `${Number.isInteger(n) ? n : n.toFixed(1)} ${unit}`;
+}
 
-export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth, highlight = null }) {
+/** The little drawing on the measure screen — same drawings as ccf-size.js. */
+export function MeasureArt({ type, h = 78 }) {
+  const a = 'var(--sfp-accent)';
+  return (
+    <svg width={Math.round(h * 160 / 90)} height={h} viewBox="0 0 160 90" aria-hidden="true">
+      {type === 'shoes' && (
+        <>
+          <rect x="8" y="64" width="144" height="16" rx="4" fill="#F3F4F6" stroke="#D1D5DB" />
+          {Array.from({ length: 14 }, (_, i) => <path key={i} d={`M${16 + i * 10} 64v${i % 2 ? 4 : 7}`} stroke="#9CA3AF" />)}
+          <path d="M22 40c0-10 9-17 24-17h52c14 0 26 5 30 13 3 7-2 14-12 15l-18 2H44c-14 0-22-5-22-13z" fill="#EADFD3" stroke="#C8B6A3" />
+          {[[128, 30, 5], [136, 36, 3.6], [139, 42, 3.2], [139, 48, 2.8], [135, 53, 2.5]].map(([cx, cy, rr]) => <circle key={cx + cy} cx={cx} cy={cy} r={rr} fill="#EADFD3" stroke="#C8B6A3" />)}
+          <path d="M22 58h122" stroke={a} strokeWidth="2" /><path d="M22 54v8M144 54v8" stroke={a} strokeWidth="2" />
+        </>
+      )}
+      {type === 'rings' && (
+        <>
+          <rect x="62" y="4" width="34" height="86" rx="17" fill="#F1E4D6" stroke="#D9C2AA" />
+          <path d="M70 18c3 2 15 2 18 0" stroke="#D9C2AA" fill="none" />
+          <ellipse cx="79" cy="58" rx="20" ry="6" fill="none" stroke="#D4A24C" strokeWidth="4" />
+          <ellipse cx="79" cy="36" rx="20" ry="5.5" fill="none" stroke={a} strokeWidth="2" strokeDasharray="4 3" />
+          <path d="M99 36h48" stroke={a} strokeWidth="2" strokeDasharray="4 3" />
+          {[0, 1, 2, 3, 4].map((i) => <path key={i} d={`M${107 + i * 9} 40v6`} stroke="#9CA3AF" />)}
+        </>
+      )}
+      {type === 'bangles' && (
+        <>
+          <path d="M52 86V50c0-8 2-14 6-18l4-18c1-5 8-5 9 0l1 12 2-16c1-5 8-5 9 0l1 16 2-14c1-5 8-5 9 0l1 16 2-10c1-5 8-4 8 1l-2 26c0 8-2 14-6 18v23z" fill="#F1E4D6" stroke="#D9C2AA" strokeLinejoin="round" />
+          <path d="M44 48h72" stroke={a} strokeWidth="2" /><path d="M44 44v8M116 44v8" stroke={a} strokeWidth="2" />
+          <ellipse cx="80" cy="80" rx="30" ry="7" fill="none" stroke="#D4A24C" strokeWidth="4" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth, highlight = null, storeType = 'clothing', measure = null, measureChart = [] }) {
+  const isMeasure = !!measure;
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
   const gender = genders.includes(editorGender) ? editorGender : (genders[0] || 'women');
   const [device, setDevice] = useState('desktop');
   const [ownView, setOwnView] = useState(5);
-  const view = viewProp || ownView;
+  const rawView = viewProp || ownView;
+  const view = isMeasure ? Math.min(Math.max(rawView, 1), 2) : rawView;
   const setView = onViewChange || setOwnView;
   const t = (k, size) => advisorText(settings.texts, k, size);
   // ' is-hl' on the part of the preview that the field being edited changes.
@@ -129,7 +179,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const chart = settings.charts[gender] || [];
+  const chart = isMeasure ? measureChart : (settings.charts[gender] || []);
   const chartKey = JSON.stringify(chart);
   const sample = SAMPLE_SHOPPER[gender];
   const hUnit = settings.unit === 'in' ? 'ft' : 'cm';
@@ -147,10 +197,9 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
     setLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const d = await apiSend(`/api/size-finder/${shop}/preview`, 'POST', {
-          chart,
-          answers: { gender, heightCm: sample.heightCm, weightKg: sample.weightKg, shape: 'average', fit: 'regular' },
-        });
+        const d = await apiSend(`/api/size-finder/${shop}/preview`, 'POST', isMeasure
+          ? { storeType, chart, value: measure.start }
+          : { chart, answers: { gender, heightCm: sample.heightCm, weightKg: sample.weightKg, shape: 'average', fit: 'regular' } });
         if (!cancelled) { setResult(d); setError(''); }
       } catch (e) {
         if (!cancelled) { setResult(null); setError(e.message || 'Could not work out a size'); }
@@ -160,7 +209,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shop, gender, chartKey]);
+  }, [shop, gender, chartKey, storeType]);
 
   const chartSizes = chart.map((r) => String(r.size));
   const heightPct = ((sample.heightCm - 140) / (210 - 140)) * 100;
@@ -168,19 +217,21 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const style = settings.buttonStyle || 'outline';
   const label = (g) => (g === 'men' ? t('menLabel') : t('womenLabel'));
 
-  const card = !genders.length ? (
-    <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the button.</p>
+  const hasChart = isMeasure ? chart.length > 0 : genders.length > 0;
+  const caption = isMeasure && (!settings.cardText || settings.cardText === CLOTHING_CAPTION) ? measure.caption : (settings.cardText || CLOTHING_CAPTION);
+  const card = !hasChart ? (
+    <p className="sfp-warn">{isMeasure ? 'The size chart is empty' : 'Both size charts are empty'}, so shoppers won&apos;t see the button.</p>
   ) : (
     <div className={`sfp-page${hl('productTag')}`}>
       <p className="sfp-pagelabel">Size</p>
-      <div className="sfp-pills" aria-hidden="true">{['S', 'M', 'L'].map((s) => <span key={s} className={s === 'M' ? 'on' : ''}>{s}</span>)}</div>
+      <div className="sfp-pills" aria-hidden="true">{(isMeasure ? chart.slice(0, 4).map((r) => String(r.size)) : ['S', 'M', 'L']).map((s, i) => <span key={s} className={i === 1 ? 'on' : ''}>{s}</span>)}</div>
       <span
         className={`sfp-trigger is-${style}${hl('buttonText', 'accentColor', 'buttonStyle', 'buttonRadius')}`}
         style={{ borderRadius: ctaRadius(settings.buttonRadius) }}
       >
-        <I s={18}>{HANGER}</I>{settings.buttonText || 'Find my ideal size'}
+        <I s={18}>{TYPE_ICON[storeType] || HANGER}</I>{settings.buttonText || 'Find my ideal size'}
       </span>
-      <p className={`sfp-caption${hl('cardText')}`}>{settings.cardText || '3 quick questions · takes 20 seconds'}</p>
+      <p className={`sfp-caption${hl('cardText')}`}>{caption}</p>
       <span className="sfp-addcart">Add to cart</span>
     </div>
   );
@@ -202,7 +253,96 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   );
   const rows = result ? sizeRows(chartSizes, result.size) : [];
 
-  const sheet = genders.length > 0 && (
+  const sheet = isMeasure ? (chart.length > 0 && (
+    <div className="sfp-sheet">
+      <div className="sfp-grab" />
+      <div className="sfp-head">
+        <span className="sfp-hicon" />
+        <span className={`sfp-htitle${hl('advisorTitle')}`}>{t('advisorTitle')}</span>
+        <span className="sfp-hicon">×</span>
+      </div>
+      <div className="sfp-body">
+        {view === 1 && (
+          <>
+            <div className="sfp-stepper is-two" aria-hidden="true">
+              <span className="sfp-stepwrap"><span className="sfp-dot is-on">1</span><span className="sfp-line" /></span>
+              <span className="sfp-stepwrap"><span className="sfp-dot">2</span></span>
+            </div>
+            <p className="sfp-title">{measure.title}</p>
+            <p className="sfp-lede">{measure.text}</p>
+            <div className="sfp-art"><MeasureArt type={storeType} h={70} /></div>
+            {measure.alt && (
+              <div className="sfp-modes"><span className="on">Measure yourself</span><span>{measure.alt.label}</span></div>
+            )}
+            <div className="sfp-field">
+              <div className="sfp-frow">
+                <span className="sfp-flabel">{measure.value}</span>
+                <span className="sfp-fval">{measureLabel(measure.start, measure.unit)}</span>
+              </div>
+              <div className="sfp-track"><span style={{ width: `${((measure.start - measure.min) / (measure.max - measure.min)) * 100}%` }} /><b style={{ left: `${((measure.start - measure.min) / (measure.max - measure.min)) * 100}%` }} /></div>
+              <div className="sfp-minmax"><span>{measureLabel(measure.min, measure.unit)}</span><span>{measureLabel(measure.max, measure.unit)}</span></div>
+            </div>
+            {opt.liveEstimate && (
+              <div className={`sfp-live${hl('liveEstimate')}`}><span>Likely size <b>{result ? result.size : '—'}</b></span></div>
+            )}
+            <div className="sfp-howto">
+              <b>How to measure</b>
+              <ol>{measure.howTo.map((h) => <li key={h}>{h}</li>)}</ol>
+            </div>
+            {opt.rememberSize && (
+              <div className={`sfp-check${hl('rememberSize')}`}>
+                <span><b>Remember my size</b><small>We save only the size, never your measurement.</small></span>
+                <i className="sfp-box" aria-hidden="true" />
+              </div>
+            )}
+          </>
+        )}
+        {view === 2 && (
+          <>
+            <p className="sfp-change">‹ Measure again</p>
+            {error && <p className="sfp-err" role="alert">{error}</p>}
+            {!error && !result && <p className="sfp-muted sfp-loading">{loading ? 'Working out the size…' : 'Add sizes to the chart to see a result.'}</p>}
+            {!error && result && (
+              <>
+                <div className="sfp-result">
+                  <div className="sfp-pvis">
+                    <span className="sfp-pimg"><I s={30} w={1.4}>{TYPE_ICON[storeType]}</I></span>
+                    <span className="sfp-me">{measure.value.split(' ')[0]} {measureLabel(measure.start, measure.unit)}</span>
+                  </div>
+                  <div>
+                    <div className="sfp-prod"><span className="sfp-thumb" /><span><b>{SAMPLE_PRODUCT[storeType]}</b><small>₹1,499</small></span></div>
+                    <div className="sfp-hero">
+                      <p className={`sfp-rtitle${hl('resultTitle')}`}>{t('resultTitle')}</p>
+                      <div className="sfp-big"><b>{result.size}</b><span className="sfp-pill">✓ Best match</span></div>
+                      <p className="sfp-fit">{measure.fit[(result.reasons && result.reasons[0] && result.reasons[0].status) === 'roomy' ? 'roomy' : 'right']}</p>
+                    </div>
+                    <p className="sfp-other">Compare sizes</p>
+                    <div className={`sfp-sizes${hl('chart')}`}>
+                      {rows.map((r) => (
+                        <div key={r.size} className={`sfp-size${r.rec ? ' is-rec' : ''}`}>
+                          <b aria-label={r.rec ? 'Recommended size' : undefined}>{r.size}</b><small>{r.rec ? 'Recommended' : r.note === 'Fits close' ? 'Snugger' : 'Looser'}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {result.outOfRange && <p className="sfp-note is-warn">{result.size} is the largest size in the chart — it may feel tight.</p>}
+                <div className="sfp-links">{opt.sizeChart && <span className={hl('sizeChart').trim()}>View size chart</span>}<span>Edit measurement</span></div>
+                <p className="sfp-fine">A guide based on your measurement and this product’s size chart.</p>
+              </>
+            )}
+          </>
+        )}
+      </div>
+      <div className="sfp-foot">
+        {view === 1 && <span className="sfp-main">Find my size</span>}
+        {view === 2 && result && (opt.addToBag
+          ? <><span className={`sfp-main${hl('addToBag', 'addToBagText')}`}>{t('addToBagText', result.size)}</span><span className="sfp-ghost">Just select size {result.size}</span></>
+          : <span className={`sfp-main${hl('addToBag')}`}>Select size {result.size}</span>)}
+        {view === 1 && privacy}
+      </div>
+    </div>
+  )) : genders.length > 0 && (
     <div className="sfp-sheet">
       <div className="sfp-grab" />
       <div className="sfp-head">
@@ -363,7 +503,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
           <div className="sfp-blockhead">
             <p className="sfp-blocktitle"><span>2</span>Size preview</p>
             <div className="sfp-views" role="group" aria-label="Preview screen">
-              {VIEWS.map(([v, l]) => (
+              {(isMeasure ? MEASURE_VIEWS : VIEWS).map(([v, l]) => (
                 <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{l}</button>
               ))}
             </div>
@@ -375,7 +515,9 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
         )}
       </div>
       <p className="sfp-sample">
-        Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, balanced build.
+        {isMeasure
+          ? <>Sample shopper: {measure.value.toLowerCase()} {measureLabel(measure.start, measure.unit)}.</>
+          : <>Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, balanced build.</>}
       </p>
     </section>
   );
@@ -511,6 +653,17 @@ const CSS = `
 .sfp-links{display:flex;justify-content:center;gap:6px;margin:10px 0 2px}
 .sfp-links span{font-size:10px;font-weight:600;padding:4px 9px;border:1px solid #E5E7EB;border-radius:999px}
 .sfp-fine{text-align:center;font-size:9px;color:#9CA3AF;margin:6px 0 0 !important}
+.sfp-stepper.is-two{max-width:120px;margin-left:auto;margin-right:auto}
+.sfp-art{display:flex;justify-content:center;margin:6px 0 8px;padding:8px;border-radius:12px;background:linear-gradient(180deg,#FAFAF9,#F3F2EF)}
+.sfp-modes{display:flex;background:#F1F1F1;border-radius:9px;padding:3px;margin:0 0 8px}
+.sfp-modes span{flex:1;text-align:center;font-size:10px;font-weight:600;color:#6B7280;padding:5px 4px;border-radius:7px}
+.sfp-modes span.on{background:#fff;color:#111;box-shadow:0 1px 2px rgba(0,0,0,.1)}
+.sfp-howto{margin-top:8px;padding:8px 10px;border-radius:10px;background:#F7F7F5;font-size:10px;color:#374151}
+.sfp-howto b{font-size:10.5px}
+.sfp-howto ol{margin:4px 0 0;padding-left:15px;display:flex;flex-direction:column;gap:2px;line-height:1.35}
+.sfp-pvis{position:relative;border-radius:14px;background:radial-gradient(120% 70% at 50% 18%,#FFFFFF 0,#F4F3F0 55%,#E9E7E2 100%);min-height:170px;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
+.sfp-pimg{width:76px;height:76px;border-radius:18px;background:linear-gradient(135deg,#E9E4DA,#D8D0C2);display:flex;align-items:center;justify-content:center;color:#6B5B45}
+.sfp-fit{font-size:9.5px;color:#4B5563;margin:2px 0 0 !important}
 .sfp-loading{padding:18px 0;text-align:center}
 .sfp-err{font-size:12px;color:#B42318;font-weight:500;background:#FEF2F2;border-radius:6px;padding:8px 10px;text-align:left}
 .sfp-foot{padding:8px 18px 12px}

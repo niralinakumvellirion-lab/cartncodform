@@ -416,3 +416,119 @@ describe('ccf-size.js — words and parts set in the admin', () => {
     expect(rows).toEqual(['Woman']);
   });
 });
+
+// ── Phase 8: shoes / rings / bangles stores (one measurement) ─────────────────
+
+describe('ccf-size.js — measure stores', () => {
+  const MEASURE = {
+    shoes: {
+      type: 'shoes', value: 'Foot length', unit: 'cm', min: 18, max: 33, step: 0.1, start: 25,
+      title: 'Measure your foot', text: 'Stand on a sheet of paper.', howTo: ['Paper against a wall.', 'Heel on the wall.', 'Measure to the longest toe.'],
+      caption: 'Measure your foot · takes 30 seconds', fit: { right: 'True to size, with a little toe room', roomy: 'A little extra room' },
+      chart: [{ size: '6', value: 24.6 }, { size: '7', value: 25.4 }, { size: '8', value: 26.2 }],
+    },
+    rings: {
+      type: 'rings', value: 'Finger size (around)', unit: 'mm', min: 40, max: 76, step: 0.5, start: 52,
+      title: 'Measure your finger', text: 'Wrap a thread.', howTo: ['a', 'b', 'c'], caption: 'Measure your finger · takes 30 seconds',
+      alt: { label: 'A ring that fits', value: 'Inside width of the ring', min: 12.7, max: 24.2, step: 0.1, start: 16.5, toValue: 'circle' },
+      fit: { right: 'A comfortable, snug fit', roomy: 'Slightly loose' },
+      chart: [{ size: '11', value: 51 }, { size: '12', value: 52 }, { size: '13', value: 53 }],
+    },
+  };
+  const PAGE = (sizes) => `
+    <div class="shopify-section">
+      <form action="/cart/add">
+        <fieldset><legend>Size</legend>
+          ${sizes.map((v, i) => `<input type="radio" name="Size" value="${v}"${i === 0 ? ' checked' : ''}>`).join('')}
+        </fieldset>
+        <button type="submit" name="add" id="theme-add">Add to cart</button>
+      </form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size"
+           data-size-values="${sizes.join('|')}" data-product-title="Canvas Sneakers" data-product-price="₹1,499"
+           data-product-image="//cdn.shopify.com/s.jpg" data-design-mode="false"></div>
+    </div>`;
+  const settingsFor = (type) => ({ ...SETTINGS, storeType: type, genders: [], cardText: MEASURE[type].caption, measure: MEASURE[type] });
+
+  test('shoes: button with the type caption; measure screen with drawing, cm/in, − / +, how-to; no avatar steps', async () => {
+    await load({ settings: settingsFor('shoes'), pageHtml: PAGE(['6', '7', '8']), recommend: { ok: true, size: '7', outOfRange: false, reasons: [{ area: 'fit', status: 'right', value: 25.4 }] } });
+    expect(q('.ccf-sf-caption').textContent).toBe('Measure your foot · takes 30 seconds');
+    expect(q('.ccf-sf-trigger svg path').getAttribute('d')).toMatch(/^M3 16.5/); // shoe icon, not the hanger
+    open();
+    expect(q('.ccf-sf-title').textContent).toBe('Measure your foot');
+    expect(q('.ccf-sf-stepper').getAttribute('aria-label')).toBe('Step 1 of 2');
+    expect(q('.ccf-sf-art svg')).not.toBeNull();
+    expect(btn('Man')).toBeUndefined();
+    expect(q('.ccf-sf-fval').textContent).toBe('25 cm');
+    btn('More').click();
+    expect(q('.ccf-sf-fval').textContent).toBe('25.1 cm');
+    btn('in').click();
+    expect(q('.ccf-sf-fval').textContent).toBe('9.9 in');
+    expect(q('.ccf-sf-howto summary').textContent).toBe('How to measure');
+    expect(q('.ccf-sf-howto').querySelectorAll('li')).toHaveLength(3);
+  });
+
+  test('shoes: Find my size sends only the measurement (cm) and shows the result with the product picture', async () => {
+    await load({ settings: settingsFor('shoes'), pageHtml: PAGE(['6', '7', '8']), recommend: { ok: true, size: '7', outOfRange: false, reasons: [{ area: 'fit', status: 'right', value: 25.4 }] } });
+    open();
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1)).toEqual({ value: 25, remember: false, sessionId: '' });
+    expect(q('.ccf-sf-big b').textContent).toBe('7');
+    expect(q('.ccf-sf-fit').textContent).toBe('True to size, with a little toe room');
+    expect(q('.ccf-sf-pvis img').src).toBe('https://cdn.shopify.com/s.jpg');
+    expect(q('.ccf-sf-avatar')).toBeNull();
+    expect(q('.ccf-sf-me').textContent).toBe('Foot 25 cm');
+    const sizes = Array.from(document.querySelectorAll('.ccf-sf-size')).map((x) => x.textContent);
+    expect(sizes).toEqual(['6Snugger', '7Recommended', '8Looser']);
+    expect(btn('Measure again')).toBeTruthy();
+    expect(btn('Edit measurement')).toBeTruthy();
+    expect(q('.ccf-sf-fine').textContent).toMatch(/Based on your measurement/);
+    btn('View size chart').click();
+    expect(Array.from(document.querySelectorAll('.ccf-sf-table th')).map((x) => x.textContent)).toEqual(['Size', 'Foot length (cm)']);
+    expect(q('.ccf-sf-table tr.is-you').textContent).toBe('725.4');
+    q('.ccf-sf-main').click();
+    await wait(400);
+    expect(document.querySelector('input[name="Size"][value="7"]').checked).toBe(true);
+  });
+
+  test('rings: “A ring that fits” sends the inside width as the size around the finger', async () => {
+    await load({ settings: settingsFor('rings'), pageHtml: PAGE(['11', '12', '13']), recommend: { ok: true, size: '12', outOfRange: false, reasons: [{ area: 'fit', status: 'right', value: 52 }] } });
+    open();
+    expect(q('.ccf-sf-fval').textContent).toBe('52 mm');
+    btn('A ring that fits').click();
+    expect(btn('A ring that fits').getAttribute('aria-pressed')).toBe('true');
+    expect(q('.ccf-sf-flabel').textContent).toBe('Inside width of the ring');
+    expect(q('.ccf-sf-fval').textContent).toBe('16.5 mm');
+    expect(q('.ccf-sf-howto')).toBeNull();
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1).value).toBe(51.8); // π × 16.5
+    expect(q('.ccf-sf-me').textContent).toBe('Ring 16.5 mm');
+  });
+
+  test('measure + remember: saved on this device for next time (value, way of measuring, unit)', async () => {
+    await load({ settings: settingsFor('rings'), pageHtml: PAGE(['11', '12', '13']), recommend: { ok: true, size: '12', outOfRange: false, reasons: [] } });
+    open();
+    btn('More').click();
+    q('.ccf-sf-check input').click();
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1)).toMatchObject({ value: 52.5, remember: true });
+    const stored = JSON.parse(localStorage.getItem('ccf_size_answers_demo.myshopify.com'));
+    expect(stored).toMatchObject({ mval: 52.5, mode: 'self' });
+  });
+
+  test('server error → stays on the measure screen with the message', async () => {
+    await load({ settings: settingsFor('shoes'), pageHtml: PAGE(['6', '7']), recommend: { ok: false, error: 'Check your measurement and try again.' } });
+    open();
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(q('.ccf-sf-title').textContent).toBe('Measure your foot');
+    expect(q('.ccf-sf-err').textContent).toBe('Check your measurement and try again.');
+  });
+
+  test('empty measure chart → nothing on the page', async () => {
+    await load({ settings: { ...settingsFor('shoes'), measure: { ...MEASURE.shoes, chart: [] } }, pageHtml: PAGE(['6']) });
+    expect(q('#ccf-sf-root')).toBeNull();
+  });
+});

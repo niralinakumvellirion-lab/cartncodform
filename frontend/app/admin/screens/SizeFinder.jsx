@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import ThemeBlockSetup from '../components/ThemeBlockSetup';
 import SizeFinderPreview, { ADVISOR_TEXT_DEFAULTS, ADVISOR_TEXT_MAX, ADVISOR_OPTION_DEFAULTS } from './SizeFinderPreview';
+import StoreTypePicker, { StoreTypeCard, NotNeededCard } from './StoreTypePicker';
 
 const CM_PER_IN = 2.54;
+const CLOTHING_CAPTION = '3 quick questions · takes 20 seconds';
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 export const AREAS = [
   { key: 'chest', label: 'Chest' },
@@ -43,6 +45,10 @@ export function fitScale(previewHeight, viewportHeight) {
  */
 export default function SizeFinderScreen({ shop }) {
   const [settings, setSettings] = useState(null);
+  // From the backend with the settings: search words per store type, and each measure type's words/ranges.
+  const [meta, setMeta] = useState({ storeTypes: [], measureTypes: {} });
+  const [choosing, setChoosing] = useState(false); // the store-type search is open
+  const [lastQuery, setLastQuery] = useState('');
   const [gender, setGender] = useState('women');
   const [previewView, setPreviewView] = useState(5);
   // Which preview to show: the part the seller is editing ('card' / 'advisor'), or 'both'.
@@ -87,7 +93,10 @@ export default function SizeFinderScreen({ shop }) {
   useEffect(() => {
     if (!shop) return;
     apiGet(`/api/size-finder/${shop}/config`)
-      .then((d) => setSettings(d.settings))
+      .then((d) => {
+        setSettings(d.settings);
+        setMeta({ storeTypes: d.storeTypes || [], measureTypes: d.measureTypes || {} });
+      })
       .catch((e) => setLoadError(e.message || 'Could not load the size finder settings'));
   }, [shop]);
 
@@ -96,6 +105,37 @@ export default function SizeFinderScreen({ shop }) {
 
   const unit = settings.unit;
   const rows = settings.charts[gender] || [];
+  // Settings saved before store types existed have none → clothing.
+  const storeType = settings.storeType === undefined ? 'clothing' : settings.storeType;
+  const typeInfo = meta.storeTypes.find((t) => t.id === storeType) || null;
+  const measure = meta.measureTypes[storeType] || null; // shoes / rings / bangles
+  const isOn = storeType !== '' && storeType !== 'none';
+  const showPicker = storeType === '' || choosing;
+  const measureRows = (measure && settings.measureCharts && settings.measureCharts[storeType]) || [];
+  // Preview screens: clothing 1–5; measure types 1 Measure · 2 Result.
+  const mv = (v) => (measure ? (v >= 4 ? 2 : 1) : v);
+
+  function pickType(id, query) {
+    const first = storeType === '';
+    // The caption follows the kind of store while the seller hasn't written their own.
+    const captions = [CLOTHING_CAPTION, ...Object.values(meta.measureTypes).map((m) => m.caption)];
+    const nextCaption = meta.measureTypes[id] ? meta.measureTypes[id].caption : CLOTHING_CAPTION;
+    setSettings((s) => ({
+      ...s,
+      storeType: id,
+      enabled: id === 'none' ? false : (first ? true : s.enabled),
+      cardText: !s.cardText || captions.includes(s.cardText) ? nextCaption : s.cardText,
+    }));
+    setChoosing(false);
+    setLastQuery(query || '');
+    setMessage('');
+    setPreviewView(meta.measureTypes[id] ? 2 : 5);
+    setHighlight(null);
+  }
+  function setMeasureRows(next) {
+    setSettings((s) => ({ ...s, measureCharts: { ...(s.measureCharts || {}), [storeType]: next } }));
+    setMessage('');
+  }
 
   function set(patch) {
     setSettings((s) => ({ ...s, ...patch }));
@@ -133,7 +173,7 @@ export default function SizeFinderScreen({ shop }) {
       if (!el) { setHighlight(null); return; }
       const key = el.getAttribute('data-hl');
       setHighlight({ key, label: el.getAttribute('data-hl-label') || '' });
-      if (HL_VIEW[key]) setPreviewView(HL_VIEW[key]);
+      if (HL_VIEW[key]) setPreviewView(mv(HL_VIEW[key]));
     };
     return { onFocusCapture: pick, onMouseDownCapture: pick };
   }
@@ -152,7 +192,7 @@ export default function SizeFinderScreen({ shop }) {
           maxLength={ADVISOR_TEXT_MAX[k]}
           value={(settings.texts && settings.texts[k] != null) ? settings.texts[k] : ADVISOR_TEXT_DEFAULTS[k]}
           onChange={(e) => setText(k, e.target.value)}
-          onFocus={() => setPreviewView(view)}
+          onFocus={() => setPreviewView(mv(view))}
           placeholder={ADVISOR_TEXT_DEFAULTS[k]}
           style={ui.input}
           aria-label={label}
@@ -174,7 +214,7 @@ export default function SizeFinderScreen({ shop }) {
           role="switch"
           aria-checked={on}
           aria-label={`Show ${title.replace(/[“”]/g, '')}`}
-          onClick={() => { setOption(k, !on); setPreviewView(view); }}
+          onClick={() => { setOption(k, !on); setPreviewView(mv(view)); }}
           style={{ ...ui.toggle, background: on ? '#303030' : '#C9C9C9', flexShrink: 0 }}
         >
           <span style={{ ...ui.knob, transform: on ? 'translateX(20px)' : 'translateX(0)' }} />
@@ -186,17 +226,28 @@ export default function SizeFinderScreen({ shop }) {
   return (
     <div style={ui.page}>
       <style>{LAYOUT_CSS}</style>
-      <div className={`sf-layout${settings.enabled ? '' : ' is-off'}`} ref={layoutRef}>
+      <div className={`sf-layout${settings.enabled && isOn && !showPicker ? '' : ' is-off'}`} ref={layoutRef}>
       <div className="sf-main">
       <div style={ui.head}>
         <div>
           <h1 style={ui.h1}>Find my size</h1>
-          <p style={{ ...ui.muted, margin: '0 0 10px' }}>A “Try it on me” size advisor on your product pages: shoppers pick an avatar, enter height and weight, choose a build and get the right size from your chart.</p>
+          <p style={{ ...ui.muted, margin: '0 0 10px' }}>
+            {showPicker
+              ? 'Help shoppers pick the right size before they buy — set up for what your store sells.'
+              : measure
+              ? `A size helper on your product pages: shoppers measure (${measure.value.toLowerCase()}) and get the right size from your chart.`
+              : storeType === 'clothing'
+                ? 'A “Try it on me” size advisor on your product pages: shoppers pick an avatar, enter height and weight, choose a build and get the right size from your chart.'
+                : 'Help shoppers pick the right size before they buy — set up for what your store sells.'}
+          </p>
+          {isOn && !showPicker && (
           <span style={{ ...ui.pill, ...(settings.enabled ? ui.pillOn : ui.pillOff) }}>
             <span style={{ ...ui.dot, background: settings.enabled ? '#047857' : '#B45309' }} />
             {settings.enabled ? 'Showing on your store' : 'Hidden — turn on and save to show it'}
           </span>
+          )}
         </div>
+        {isOn && !showPicker && (
         <span style={ui.switchWrap}>
           <span aria-hidden="true" style={{ ...ui.switchText, color: settings.enabled ? '#065F46' : '#B45309' }}>
             {settings.enabled ? 'On' : 'Off'}
@@ -212,8 +263,20 @@ export default function SizeFinderScreen({ shop }) {
             <span style={{ ...ui.knob, transform: settings.enabled ? 'translateX(20px)' : 'translateX(0)' }} />
           </button>
         </span>
+        )}
       </div>
-      {!settings.enabled ? (
+      {showPicker ? (
+        <StoreTypePicker
+          catalog={meta.storeTypes}
+          current={storeType}
+          onPick={pickType}
+          onCancel={storeType !== '' ? () => setChoosing(false) : null}
+        />
+      ) : (<>
+      <StoreTypeCard type={typeInfo} onChange={() => setChoosing(true)} />
+      {storeType === 'none' ? (
+        <NotNeededCard shop={shop} query={lastQuery} />
+      ) : !settings.enabled ? (
         <section style={ui.offCard} aria-label="Find my size is off">
           <span style={ui.offIcon} aria-hidden="true">
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z" /><path d="m7 12 2 2M10 9l2 2M13 6l2 2" /></svg>
@@ -345,6 +408,28 @@ export default function SizeFinderScreen({ shop }) {
         </div>
       </section>
 
+      {measure ? (
+      <section style={ui.card} aria-label="Size helper" {...focusArea('advisor')}>
+        <SectionHead icon="panel" title="Size helper" text={`The panel that opens from the button: ${measure.title.toLowerCase()}, then the recommended size. Click a box and the preview jumps to that screen.`} />
+        <p style={ui.group}>Panel</p>
+        <div className="sf-grid2">
+          {textField('Panel title', 'advisorTitle', 1)}
+          {textField('Privacy note', 'privacyText', 1)}
+        </div>
+        <p style={ui.group}>Result</p>
+        <div className="sf-grid2">
+          {textField('Result heading', 'resultTitle', 5)}
+          {textField('Add to cart button', 'addToBagText', 5, '{size} becomes the size, e.g. 7')}
+        </div>
+        <p style={ui.group}>Show in the size helper</p>
+        <div style={ui.toggles}>
+          {optionSwitch('liveEstimate', 1, 'Likely size', 'Shows a likely size while shoppers move the slider.')}
+          {optionSwitch('rememberSize', 1, '“Remember my size”', 'Lets shoppers save their size for next time.')}
+          {optionSwitch('addToBag', 5, 'Add to cart button', 'Picks the size and adds it to the cart in one tap.')}
+          {optionSwitch('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.')}
+        </div>
+      </section>
+      ) : (
       <section style={ui.card} aria-label="Size advisor" {...focusArea('advisor')}>
         <SectionHead icon="panel" title="Size advisor" text="The panel that opens from the button: avatar base, height & weight, build, then the recommended size. Click a box and the preview jumps to that screen." />
 
@@ -391,7 +476,55 @@ export default function SizeFinderScreen({ shop }) {
           {optionSwitch('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.')}
         </div>
       </section>
+      )}
 
+      {measure ? (
+      <section style={ui.card} aria-label="Size chart" {...focusArea('advisor')}>
+        <SectionHead icon="chart" title="Size chart" text={`${measure.value} for each size, in ${measure.unit}, smallest first.`} />
+        <p style={ui.tip}>
+          A starter Indian chart is filled in. Size names must match the sizes on your products (for example “7” or “UK 7”).
+          Shoppers get the smallest size that fits their {measure.value.toLowerCase()}.
+        </p>
+        <table style={ui.table} aria-label="Size chart" data-hl="chart" data-hl-label="Size chart">
+          <thead>
+            <tr>
+              <th style={ui.th}>Size</th>
+              <th style={ui.th}>{measure.value} ({measure.unit})</th>
+              <th style={ui.th} />
+            </tr>
+          </thead>
+          <tbody>
+            {measureRows.map((r, i) => (
+              <tr key={i}>
+                <td style={ui.td}>
+                  <input value={r.size} maxLength={10} onChange={(e) => setMeasureRows(measureRows.map((x, idx) => (idx === i ? { ...x, size: e.target.value } : x)))} style={ui.cell} aria-label={`Row ${i + 1} size`} />
+                </td>
+                <td style={ui.td}>
+                  <input
+                    type="number"
+                    step={measure.step}
+                    min={measure.min}
+                    max={measure.max}
+                    value={r.value === '' || r.value == null ? '' : r.value}
+                    onChange={(e) => setMeasureRows(measureRows.map((x, idx) => (idx === i ? { ...x, value: e.target.value === '' ? '' : Number(e.target.value) } : x)))}
+                    style={{ ...ui.cell, maxWidth: 150 }}
+                    aria-label={`Row ${i + 1} ${measure.value}`}
+                  />
+                </td>
+                <td style={ui.td}>
+                  <button type="button" onClick={() => setMeasureRows(measureRows.filter((_, idx) => idx !== i))} style={ui.remove} aria-label={`Remove row ${i + 1}`}>✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {measureRows.length < 30 && (
+          <button type="button" style={ui.add} data-hl="chart" data-hl-label="Size chart" onClick={() => setMeasureRows([...measureRows, { size: '', value: '' }])}>
+            + Add a size
+          </button>
+        )}
+      </section>
+      ) : (
       <section style={ui.card} aria-label="Size charts" {...focusArea('advisor')}>
         <div style={ui.row}>
           <SectionHead icon="chart" title="Size charts" text="Body measurements for each size." />
@@ -453,6 +586,7 @@ export default function SizeFinderScreen({ shop }) {
           </button>
         )}
       </section>
+      )}
 
       <ThemeBlockSetup
         shop={shop}
@@ -462,21 +596,36 @@ export default function SizeFinderScreen({ shop }) {
         whenLive="Shoppers see the button once Find my size is turned on and saved."
       />
       </>)}
+      </>)}
 
+      {storeType !== '' && !choosing && (
       <div className="sf-savebar" style={ui.row}>
         <button type="button" onClick={save} disabled={saving} style={ui.save}>{saving ? 'Saving…' : 'Save'}</button>
         {message && <span style={ui.ok}>✓ {message}</span>}
         {error && <span style={ui.error} role="alert">{error}</span>}
       </div>
+      )}
       </div>
-      {settings.enabled && (
+      {settings.enabled && isOn && !showPicker && (
       <aside className="sf-side" style={fit.height ? { height: Math.ceil(fit.height * fit.scale) } : undefined}>
         <div
           ref={fitRef}
           className="sf-fit"
           style={{ transform: `scale(${fit.scale})`, width: `${100 / fit.scale}%` }}
         >
-          <SizeFinderPreview shop={shop} settings={settings} gender={gender} view={previewView} onViewChange={setPreviewView} show={previewShow} onShowBoth={() => setPreviewShow('both')} highlight={highlight} />
+          <SizeFinderPreview
+            shop={shop}
+            settings={settings}
+            gender={gender}
+            view={previewView}
+            onViewChange={setPreviewView}
+            show={previewShow}
+            onShowBoth={() => setPreviewShow('both')}
+            highlight={highlight}
+            storeType={storeType}
+            measure={measure}
+            measureChart={measureRows}
+          />
         </div>
       </aside>
       )}
@@ -512,7 +661,7 @@ function SectionHead({ icon, title, text }) {
 const LAYOUT_CSS = `
 .sf-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:20px;align-items:start}
 .sf-layout{min-height:100vh}
-.sf-layout.is-off{grid-template-columns:minmax(0,720px);justify-content:center;min-height:0}
+.sf-layout.is-off{grid-template-columns:minmax(0,860px);justify-content:center;min-height:0}
 .sf-main{display:flex;flex-direction:column;gap:16px;min-width:0;padding-bottom:40px}
 .sf-side{position:sticky;top:16px;min-width:0;overflow:visible}
 .sf-fit{transform-origin:top left}

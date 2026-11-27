@@ -14,7 +14,10 @@
 const express = require('express');
 const SizeFinderConfig = require('../models/SizeFinderConfig');
 const { verifyProxySignature } = require('../utils/shopify');
-const { publicSettings, withDefaults, sanitizeAnswers, estimateBody, recommendSize } = require('../utils/sizeFinder');
+const {
+  publicSettings, withDefaults, sanitizeAnswers, estimateBody, recommendSize,
+  MEASURE_TYPES, sanitizeMeasure, recommendByMeasure,
+} = require('../utils/sizeFinder');
 
 const router = express.Router();
 
@@ -65,19 +68,29 @@ router.post('/recommend', guard, async (req, res) => {
   if (!allow(`${req.shop}|${req.ip}`)) {
     return res.status(429).json({ ok: false, error: 'Too many tries. Wait a minute and try again.' });
   }
-  const answers = sanitizeAnswers(req.body);
-  if (!answers) {
-    return res.status(400).json({ ok: false, error: 'Check your height and weight and try again.' });
-  }
   try {
     const doc = await SizeFinderConfig.findOne({ shopDomain: req.shop }).lean();
     const settings = withDefaults(doc);
     if (!settings.enabled) return res.status(404).json({ ok: false, error: 'Size finder is off' });
-    const chart = settings.charts[answers.gender];
-    if (!chart || !chart.length) {
-      return res.status(400).json({ ok: false, error: 'No size chart for this choice' });
+    const measured = !!MEASURE_TYPES[settings.storeType];
+    let answers = null;
+    let result;
+    if (measured) {
+      // Shoes / rings / bangles: one measurement, used for the calculation only.
+      const value = sanitizeMeasure(req.body, settings.storeType);
+      if (value == null) return res.status(400).json({ ok: false, error: 'Check your measurement and try again.' });
+      const rows = settings.measureCharts[settings.storeType];
+      if (!rows || !rows.length) return res.status(400).json({ ok: false, error: 'No size chart yet' });
+      result = recommendByMeasure(rows, value, settings.storeType);
+    } else {
+      answers = sanitizeAnswers(req.body);
+      if (!answers) return res.status(400).json({ ok: false, error: 'Check your height and weight and try again.' });
+      const chart = settings.charts[answers.gender];
+      if (!chart || !chart.length) {
+        return res.status(400).json({ ok: false, error: 'No size chart for this choice' });
+      }
+      result = recommendSize(chart, estimateBody(answers), answers.fit);
     }
-    const result = recommendSize(chart, estimateBody(answers), answers.fit);
 
     let saved = false;
     if (req.body && req.body.remember === true) {
@@ -89,8 +102,9 @@ router.post('/recommend', guard, async (req, res) => {
         const { upsertProfile } = require('../services/profileService');
         const profile = await upsertProfile(req.shop, ids, {
           'sizeProfile.size': result.size,
-          'sizeProfile.gender': answers.gender,
-          'sizeProfile.fit': answers.fit,
+          'sizeProfile.gender': answers ? answers.gender : null,
+          'sizeProfile.fit': answers ? answers.fit : null,
+          'sizeProfile.kind': measured ? settings.storeType : 'clothing',
           'sizeProfile.updatedAt': new Date(),
         });
         saved = !!profile;

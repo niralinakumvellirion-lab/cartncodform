@@ -12,14 +12,21 @@ const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner')
 const SizeFinderConfig = require('../models/SizeFinderConfig');
 const {
   sanitizeSettings, withDefaults, sanitizeChart, sanitizeAnswers, estimateBody, recommendSize,
+  STORE_TYPE_CATALOG, MEASURE_TYPES, publicMeasure, sanitizeMeasureChart, sanitizeMeasure, recommendByMeasure,
 } = require('../utils/sizeFinder');
+
+// What the admin needs besides the settings: the search words and each measure type's words/ranges.
+const ADMIN_META = {
+  storeTypes: STORE_TYPE_CATALOG,
+  measureTypes: Object.fromEntries(Object.keys(MEASURE_TYPES).map((t) => [t, publicMeasure(t)])),
+};
 
 const router = express.Router();
 
 router.get('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const doc = await SizeFinderConfig.findOne({ shopDomain: req.store.shopDomain }).lean();
-    return res.json({ settings: withDefaults(doc) });
+    return res.json({ settings: withDefaults(doc), ...ADMIN_META });
   } catch (err) {
     console.error('[size-finder] GET config error:', err.message);
     return res.status(500).json({ error: 'Could not load the size finder settings' });
@@ -42,7 +49,7 @@ router.put('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, re
       { $set: { ...clean, updatedAt: new Date() }, $setOnInsert: { shopDomain: shop } },
       { upsert: true, new: true }
     ).lean();
-    return res.json({ settings: withDefaults(doc) });
+    return res.json({ settings: withDefaults(doc), ...ADMIN_META });
   } catch (err) {
     console.error('[size-finder] PUT config error:', err.message);
     return res.status(500).json({ error: 'Could not save the size finder settings' });
@@ -55,6 +62,22 @@ router.put('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, re
  * shape, fit } } → { size, outOfRange, reasons }. Same maths as the storefront; nothing is saved.
  */
 router.post('/:shopDomain/preview', requireAuth, requireStoreOwner, (req, res) => {
+  // Shoes / rings / bangles: { storeType, chart: [{ size, value }], value }.
+  const type = req.body && req.body.storeType;
+  if (MEASURE_TYPES[type]) {
+    const value = sanitizeMeasure(req.body.value, type);
+    if (value == null) return res.status(400).json({ error: 'The measurement is out of range' });
+    let rows;
+    try {
+      rows = sanitizeMeasureChart(req.body.chart, type);
+    } catch (err) {
+      if (err.isValidation) return res.status(400).json({ error: err.message, field: err.field });
+      return res.status(500).json({ error: 'Could not work out a size' });
+    }
+    if (!rows.length) return res.status(400).json({ error: 'This size chart is empty' });
+    const r = recommendByMeasure(rows, value, type);
+    return res.json({ size: r.size, outOfRange: r.outOfRange, reasons: r.reasons });
+  }
   const answers = sanitizeAnswers(req.body && req.body.answers);
   if (!answers) return res.status(400).json({ error: 'Height or weight is out of range' });
   let chart;

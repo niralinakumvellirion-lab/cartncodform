@@ -266,12 +266,12 @@ describe('storefront routes', () => {
     const [shop, ids, updates] = upsertProfile.mock.calls[0];
     expect(shop).toBe('demo.myshopify.com');
     expect(ids).toEqual({ customerId: '777', sessionId: 'abc12345-session' });
-    expect(Object.keys(updates).sort()).toEqual(['sizeProfile.fit', 'sizeProfile.gender', 'sizeProfile.size', 'sizeProfile.updatedAt']);
+    expect(Object.keys(updates).sort()).toEqual(['sizeProfile.fit', 'sizeProfile.gender', 'sizeProfile.kind', 'sizeProfile.size', 'sizeProfile.updatedAt']);
     // Height (175) and weight (72) must not be stored. Leave the timestamp out of the check: its
     // milliseconds can contain "175" or "72" by chance.
     const { 'sizeProfile.updatedAt': when, ...stored } = updates;
     expect(when).toBeInstanceOf(Date);
-    expect(stored).toEqual({ 'sizeProfile.size': res.body.size, 'sizeProfile.gender': 'men', 'sizeProfile.fit': 'relaxed' });
+    expect(stored).toEqual({ 'sizeProfile.size': res.body.size, 'sizeProfile.gender': 'men', 'sizeProfile.fit': 'relaxed', 'sizeProfile.kind': 'clothing' });
   });
 
   test('remember without any id → nothing saved', async () => {
@@ -284,6 +284,7 @@ describe('storefront routes', () => {
   test('turned off → 404; bad answers → 400; no chart for that choice → 400', async () => {
     SizeFinderConfig.findOne.mockReturnValue(lean({ ...ON, enabled: false }));
     expect((await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 162, weightKg: 58 }))).statusCode).toBe(404);
+    SizeFinderConfig.findOne.mockReturnValue(lean(ON));
     expect((await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 50, weightKg: 58 }))).statusCode).toBe(400);
     SizeFinderConfig.findOne.mockReturnValue(lean({ enabled: true, charts: { women: S.DEFAULT_CHARTS.women, men: [] } }));
     expect((await run(proxyRouter, '/recommend', 'post', req({ gender: 'men', heightCm: 175, weightKg: 72 }))).statusCode).toBe(400);
@@ -332,5 +333,112 @@ describe('admin preview', () => {
       params: {}, body: { answers: { gender: 'men', heightCm: 90, weightKg: 72 }, chart: [] },
     });
     expect(out.statusCode).toBe(400);
+  });
+});
+
+// ── Phase 8: store types (shoes · rings · bangles · none) ─────────────────────
+
+describe('store types', () => {
+  const req = (body, extraQuery = {}) => ({
+    query: { shop: 'demo.myshopify.com', signature: 'x', ...extraQuery }, body, ip: '9.9.9.9',
+  });
+  beforeEach(() => proxyRouter._limiter.reset());
+
+  test('never saved → no type yet (off); saved before store types → clothing', () => {
+    expect(S.withDefaults(null)).toMatchObject({ storeType: '', enabled: false });
+    expect(S.withDefaults({ enabled: true, charts: {} })).toMatchObject({ storeType: 'clothing', enabled: true });
+    expect(S.withDefaults({ enabled: true, storeType: 'none' }).enabled).toBe(false);
+    expect(S.withDefaults(null).measureCharts.shoes).toHaveLength(10);
+    expect(S.withDefaults(null).measureCharts.bangles.map((r) => r.size)).toEqual(['2.2', '2.4', '2.6', '2.8', '2.10', '2.12']);
+  });
+
+  test('every kind has search words; jewellery finds rings and bangles; electronics → not needed', () => {
+    const find = (q) => S.STORE_TYPE_CATALOG.filter((t) => t.words.some((w) => w.includes(q))).map((t) => t.id);
+    expect(find('sneakers')).toEqual(['shoes']);
+    expect(find('saree')).toEqual(['clothing']);
+    expect(find('jewellery')).toEqual(['rings', 'bangles']);
+    expect(find('mobile')).toEqual(['none']);
+    S.STORE_TYPES.forEach((t) => expect(S.STORE_TYPE_CATALOG.find((c) => c.id === t)).toBeTruthy());
+  });
+
+  test('sanitizeSettings: type must be known; measure chart validated; none is always off', () => {
+    expect(() => S.sanitizeSettings({ storeType: 'cars' })).toThrow(/what your store sells/);
+    const shoes = S.sanitizeSettings({ storeType: 'shoes', enabled: true, charts: { women: [], men: [] }, measureCharts: { shoes: [{ size: ' 7 ', value: '25.4' }] } });
+    expect(shoes.storeType).toBe('shoes');
+    expect(shoes.measureCharts.shoes).toEqual([{ size: '7', value: 25.4 }]);
+    expect(shoes.measureCharts.rings).toHaveLength(19); // untouched types keep the starter chart
+    expect(() => S.sanitizeSettings({ storeType: 'shoes', measureCharts: { shoes: [] } })).toThrow(/at least one size/);
+    expect(() => S.sanitizeSettings({ storeType: 'shoes', measureCharts: { shoes: [{ size: '6', value: 26 }, { size: '7', value: 25 }] } })).toThrow(/bigger than the size above/);
+    expect(() => S.sanitizeSettings({ storeType: 'rings', measureCharts: { rings: [{ size: '6', value: 200 }] } })).toThrow(/40–76 mm/);
+    expect(() => S.sanitizeSettings({ storeType: 'rings', measureCharts: { rings: [{ size: '6', value: 46 }, { size: '6', value: 47 }] } })).toThrow(/twice/);
+    expect(S.sanitizeSettings({ storeType: 'none', enabled: true }).enabled).toBe(false);
+  });
+
+  test('recommendByMeasure: smallest size that covers it; right / roomy; bigger than the chart → largest, flagged', () => {
+    const shoes = S.DEFAULT_MEASURE_CHARTS.shoes;
+    expect(S.recommendByMeasure(shoes, 25.0, 'shoes')).toMatchObject({ size: '7', outOfRange: false, reasons: [{ area: 'fit', status: 'right', value: 25.4 }] });
+    expect(S.recommendByMeasure(shoes, 24.7, 'shoes').reasons[0].status).toBe('roomy');
+    expect(S.recommendByMeasure(shoes, 31, 'shoes')).toMatchObject({ size: '12', outOfRange: true });
+    expect(S.recommendByMeasure(S.DEFAULT_MEASURE_CHARTS.rings, 52, 'rings').size).toBe('12');
+    expect(S.recommendByMeasure(S.DEFAULT_MEASURE_CHARTS.bangles, 58, 'bangles').size).toBe('2.6');
+    expect(S.sanitizeMeasure({ value: 10 }, 'shoes')).toBeNull();
+    expect(S.sanitizeMeasure({ value: '26.04' }, 'shoes')).toBe(26);
+    expect(S.sanitizeMeasure({ value: 26 }, 'clothing')).toBeNull();
+  });
+
+  test('public settings: measure words + chart for that type; no genders; type caption when unchanged', () => {
+    const pub = S.publicSettings({ enabled: true, storeType: 'rings' });
+    expect(pub.storeType).toBe('rings');
+    expect(pub.genders).toEqual([]);
+    expect(pub.measure).toMatchObject({ type: 'rings', unit: 'mm', min: 40, max: 76, title: 'Measure your finger' });
+    expect(pub.measure.chart).toHaveLength(19);
+    expect(pub.measure.tolerance).toBeUndefined();
+    expect(pub.cardText).toBe('Measure your finger · takes 30 seconds');
+    expect(S.publicSettings({ enabled: true, storeType: 'rings', cardText: 'Quick ring sizer' }).cardText).toBe('Quick ring sizer');
+    expect(S.publicSettings({ enabled: true }).measure).toBeNull();
+  });
+
+  test('admin GET sends the search words and measure types; PUT saves the type and chart', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean(null));
+    const got = await run(adminRouter, '/:shopDomain/config', 'get', { params: {} });
+    expect(got.body.settings.storeType).toBe('');
+    expect(got.body.storeTypes.map((t) => t.id)).toEqual(['clothing', 'shoes', 'rings', 'bangles', 'none']);
+    expect(got.body.measureTypes.shoes).toMatchObject({ unit: 'cm', value: 'Foot length' });
+    SizeFinderConfig.findOneAndUpdate.mockReturnValue(lean({ enabled: true, storeType: 'bangles' }));
+    const put = await run(adminRouter, '/:shopDomain/config', 'put', {
+      params: {}, body: { settings: { enabled: true, storeType: 'bangles', measureCharts: { bangles: [{ size: '2.4', value: 57 }] } } },
+    });
+    expect(put.statusCode).toBe(200);
+    const [, update] = SizeFinderConfig.findOneAndUpdate.mock.calls[0];
+    expect(update.$set).toMatchObject({ storeType: 'bangles', enabled: true });
+    expect(update.$set.measureCharts.bangles).toEqual([{ size: '2.4', value: 57 }]);
+    expect(put.body.settings.storeType).toBe('bangles');
+  });
+
+  test('admin preview for a measure type uses the unsaved chart', async () => {
+    const ok = await run(adminRouter, '/:shopDomain/preview', 'post', {
+      params: {}, body: { storeType: 'shoes', value: 26, chart: [{ size: 'UK 7', value: 25.4 }, { size: 'UK 8', value: 26.2 }] },
+    });
+    expect(ok.body).toMatchObject({ size: 'UK 8', outOfRange: false });
+    const bad = await run(adminRouter, '/:shopDomain/preview', 'post', { params: {}, body: { storeType: 'shoes', value: 99, chart: [] } });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  test('storefront: shoes measurement → size; remember saves size + kind only; out of range → 400', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean({ enabled: true, storeType: 'shoes' }));
+    const res = await run(proxyRouter, '/recommend', 'post', req({ value: 26.0, remember: true, sessionId: 'abc12345-session' }));
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, size: '8', saved: true });
+    const [, , updates] = upsertProfile.mock.calls[0];
+    const { 'sizeProfile.updatedAt': when, ...stored } = updates;
+    expect(when).toBeInstanceOf(Date);
+    expect(stored).toEqual({ 'sizeProfile.size': '8', 'sizeProfile.gender': null, 'sizeProfile.fit': null, 'sizeProfile.kind': 'shoes' });
+    expect((await run(proxyRouter, '/recommend', 'post', req({ value: 50 }))).statusCode).toBe(400);
+  });
+
+  test('storefront: none → off', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean({ enabled: true, storeType: 'none' }));
+    expect((await run(proxyRouter, '/recommend', 'post', req({ value: 26 }))).statusCode).toBe(404);
+    expect((await run(proxyRouter, '/config', 'get', req())).body.settings.enabled).toBe(false);
   });
 });
