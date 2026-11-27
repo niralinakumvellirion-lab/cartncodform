@@ -9,6 +9,8 @@
      "Recommended size" list (fits close / recommended / roomy) and Add to cart.
    Shoes / rings / bangles stores (settings.measure) get a 2-step flow instead: 1. Measure (drawing,
    how-to, one slider — or a ring/bangle that fits) → Result with the product picture.
+   Baby & kids clothes (settings.baby) use the same 2 steps: the baby's length + weight, or age only,
+   and "Fits now / Room to grow".
    The admin's live preview (SizeFinderPreview.jsx) mirrors this design. */
 (function () {
   'use strict';
@@ -28,6 +30,7 @@
   var SHIRT = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z"/></svg>';
   // Button icon per kind of store, and the drawing on the measure screen (same as the admin preview).
   var TYPE_ICONS = {
+    baby: SVG + '<path d="M9 3h6l1 3 4 2-2 4-2-1v9H8v-9l-2 1-2-4 4-2z"/><path d="M10 6c.6.7 1.2 1 2 1s1.4-.3 2-1"/></svg>',
     shoes: SVG + '<path d="M3 16.5V8.5c0-.8.7-1.5 1.5-1.5H7l2 3.5c.9 1.6 2.6 2.5 4.4 2.5H15l4 1.2c1.2.4 2 1.4 2 2.6v.7H3z"/><path d="M3 19h18"/></svg>',
     rings: SVG + '<circle cx="12" cy="14.5" r="6"/><path d="M9.5 8.8 8 5.5h8l-1.5 3.3"/><path d="M10 5.5 12 3l2 2.5"/></svg>',
     bangles: SVG + '<ellipse cx="12" cy="12" rx="8.5" ry="4.5"/><ellipse cx="12" cy="12" rx="5.5" ry="2.6"/></svg>',
@@ -43,6 +46,12 @@
         out += '<circle cx="' + t[0] + '" cy="' + t[1] + '" r="' + t[2] + '" fill="#EADFD3" stroke="#C8B6A3"/>';
       });
       out += '<path d="M22 58h122" stroke="' + a + '" stroke-width="2"/><path d="M22 54v8M144 54v8" stroke="' + a + '" stroke-width="2"/>';
+    } else if (type === 'baby') {
+      out += '<rect x="8" y="70" width="144" height="12" rx="4" fill="#F3F4F6" stroke="#D1D5DB"/>';
+      for (var k = 0; k < 14; k++) out += '<path d="M' + (16 + k * 10) + ' 70v' + (k % 2 ? 3 : 6) + '" stroke="#9CA3AF"/>';
+      out += '<circle cx="34" cy="42" r="11" fill="#F1E4D6" stroke="#D9C2AA"/>' +
+        '<path d="M45 34h52c8 0 14 4 18 8l14 2c5 1 5 9 0 10l-14 2c-4 4-10 8-18 8H45c-6 0-9-5-9-15s3-15 9-15z" fill="#DCEBFB" stroke="#A9C7EA"/>' +
+        '<path d="M24 62h110" stroke="' + a + '" stroke-width="2"/><path d="M24 58v8M134 58v8" stroke="' + a + '" stroke-width="2"/>';
     } else if (type === 'rings') {
       out += '<rect x="62" y="4" width="34" height="86" rx="17" fill="#F1E4D6" stroke="#D9C2AA"/>' +
         '<path d="M70 18c3 2 15 2 18 0" stroke="#D9C2AA"/>' +
@@ -244,6 +253,11 @@
       '.ccf-sf-adj{display:inline-flex;align-items:center;gap:6px}',
       '.ccf-sf-adj button{width:30px;height:30px;border-radius:50%;border:1px solid #E5E7EB;background:#fff;color:#111;font-size:17px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}',
       '.ccf-sf-adj button:hover{border-color:#9CA3AF}',
+      '.ccf-sf-fitcards{display:flex;gap:8px;margin:14px 0 0}',
+      '.ccf-sf-fitcards button{flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;border:1.5px solid #E5E7EB;border-radius:12px;background:#fff;color:#111;text-align:left;cursor:pointer}',
+      '.ccf-sf-fitcards button b{font-size:13px;font-weight:650}',
+      '.ccf-sf-fitcards button small{font-size:11.5px;color:#6B7280}',
+      '.ccf-sf-fitcards button[aria-pressed="true"]{border-color:' + accent + ';box-shadow:0 0 0 1px ' + accent + '}',
       '.ccf-sf-howto{margin:12px 0 0;border-radius:12px;background:#F9FAFB;border:1px solid #F0F0F0}',
       '.ccf-sf-howto summary{list-style:none;cursor:pointer;padding:10px 12px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center}',
       '.ccf-sf-howto summary::-webkit-details-marker{display:none}',
@@ -403,6 +417,14 @@
     // Shoes / rings / bangles: one measurement instead of height, weight and build.
     var M = settings.measure && settings.storeType && settings.storeType !== 'clothing' && Array.isArray(settings.measure.chart)
       ? settings.measure : null;
+    // Baby & kids clothes: length + weight (or age); shown with the same 2-step layout.
+    var BB = settings.storeType === 'baby' && settings.baby && Array.isArray(settings.baby.chart) ? settings.baby : null;
+    if (BB) {
+      M = {
+        chart: BB.chart, title: BB.title, text: BB.text, howTo: BB.howTo, fit: BB.fit,
+        value: 'Length', unit: 'cm', min: BB.length.min, max: BB.length.max, step: BB.length.step, start: BB.length.start,
+      };
+    }
     if (M ? !M.chart.length : !genders.length) { root.remove(); return; }
     var texts = settings.texts || {};
     function T(key, size) {
@@ -441,6 +463,12 @@
       aval: M && M.alt && Number(saved.aval) >= M.alt.min && Number(saved.aval) <= M.alt.max ? Number(saved.aval) : (M && M.alt ? M.alt.start : 0),
       mode: M && M.alt && saved.mode === 'alt' ? 'alt' : 'self',
       mUnit: saved.mUnit === 'in' || (!saved.mUnit && settings.unit === 'in') ? 'in' : 'cm',
+      // baby
+      blen: BB && Number(saved.blen) >= BB.length.min && Number(saved.blen) <= BB.length.max ? Number(saved.blen) : (BB ? BB.length.start : 0),
+      bwt: BB && Number(saved.bwt) >= BB.weight.min && Number(saved.bwt) <= BB.weight.max ? Number(saved.bwt) : (BB ? BB.weight.start : 0),
+      bage: BB && Number(saved.bage) >= BB.age.min && Number(saved.bage) <= BB.age.max ? Number(saved.bage) : (BB ? BB.age.start : 0),
+      bmode: BB && saved.bmode === 'age' ? 'age' : 'measure',
+      grow: !!(BB && saved.grow === true),
     };
 
     var design = root.getAttribute('data-design-mode') === 'true' || !!(window.Shopify && window.Shopify.designMode);
@@ -555,7 +583,25 @@
       if (unit === 'cm' && state.mUnit === 'in') return fmt(v / CM_PER_IN) + ' in';
       return fmt(v) + ' ' + unit;
     }
+    // What goes to /recommend for shoes / rings / bangles (one value) or a baby (length + weight, or age).
+    function measureBody(extra) {
+      var b = !BB ? { value: measuredValue() }
+        : state.bmode === 'age' ? { mode: 'age', ageMonths: Math.round(state.bage), grow: state.grow }
+        : { mode: 'measure', lengthCm: Math.round(state.blen * 10) / 10, weightKg: Math.round(state.bwt * 10) / 10, grow: state.grow };
+      Object.keys(extra || {}).forEach(function (k) { b[k] = extra[k]; });
+      return b;
+    }
+    function babyWeightText(kg) {
+      return state.wUnit === 'lb' ? fmt(kg / KG_PER_LB) + ' lb' : fmt(kg) + ' kg';
+    }
+    function ageText(m) {
+      var n = Math.round(m);
+      if (n < 12) return n + (n === 1 ? ' month' : ' months');
+      var y = Math.floor(n / 12), mo = n % 12;
+      return y + (y === 1 ? ' year' : ' years') + (mo ? ' ' + mo + ' m' : '');
+    }
     function shortMeasure() {
+      if (BB) return state.bmode === 'age' ? 'Age ' + ageText(state.bage) : mText(state.blen, 'cm') + ' · ' + babyWeightText(state.bwt);
       var word = state.mode === 'alt' && M.alt ? (settings.storeType === 'rings' ? 'Ring' : 'Bangle') : M.value.split(' ')[0];
       var shown = state.mode === 'alt' && M.alt ? state.aval : state.mval;
       return word + ' ' + mText(shown, M.unit);
@@ -579,6 +625,7 @@
     function fitText(r, pick, chart, at) {
       if (M && String(pick) === String(r.size)) {
         var st = r.reasons && r.reasons[0] && r.reasons[0].status;
+        if (BB) return BB.fit[st] || BB.fit.right;
         return (M.fit && M.fit[st === 'roomy' ? 'roomy' : 'right']) || '';
       }
       if (String(pick) !== String(r.size)) {
@@ -674,7 +721,7 @@
         fetch(PROXY + '/recommend?shop=' + encodeURIComponent(shop), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(M ? { value: measuredValue(), remember: false, sessionId: '' } : {
+          body: JSON.stringify(M ? measureBody({ remember: false, sessionId: '' }) : {
             gender: state.gender, heightCm: Math.round(state.heightCm), weightKg: Math.round(state.weightKg),
             shape: 'average', fit: 'regular', remember: false, sessionId: '',
           }),
@@ -687,6 +734,23 @@
     }
 
     function chartTable(gender, you) {
+      if (BB) {
+        var bt = el('table', 'ccf-sf-table');
+        var bh = el('tr');
+        ['Size', 'Length (' + (state.mUnit === 'in' ? 'in' : 'cm') + ')', 'Weight (' + (state.wUnit === 'lb' ? 'lb' : 'kg') + ')', 'Age'].forEach(function (h) { bh.appendChild(el('th', null, h)); });
+        bt.appendChild(bh);
+        var prevAge = 0;
+        BB.chart.forEach(function (row) {
+          var tr = el('tr', String(row.size) === String(you) ? 'is-you' : null);
+          tr.appendChild(el('td', null, row.size));
+          tr.appendChild(el('td', null, 'up to ' + mText(row.maxLength, 'cm').replace(/ (cm|in)$/, '')));
+          tr.appendChild(el('td', null, 'up to ' + babyWeightText(row.maxWeight).replace(/ (kg|lb)$/, '')));
+          tr.appendChild(el('td', null, prevAge + '–' + row.maxAge + ' m'));
+          prevAge = row.maxAge;
+          bt.appendChild(tr);
+        });
+        return bt;
+      }
       if (M) {
         var mt = el('table', 'ccf-sf-table');
         var mh = el('tr');
@@ -725,6 +789,7 @@
         gender: state.gender, heightCm: state.heightCm, weightKg: state.weightKg,
         hUnit: state.hUnit, wUnit: state.wUnit, shape: state.shape,
         mval: state.mval, aval: state.aval, mode: state.mode, mUnit: state.mUnit,
+        blen: state.blen, bwt: state.bwt, bage: state.bage, bmode: state.bmode, grow: state.grow,
         size: extra && extra.size ? extra.size : prev.size,
       });
     }
@@ -759,7 +824,7 @@
       fetch(PROXY + '/recommend?shop=' + encodeURIComponent(shop), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(M ? { value: measuredValue(), remember: state.remember, sessionId: state.remember ? sessionId() : '' } : {
+        body: JSON.stringify(M ? measureBody({ remember: state.remember, sessionId: state.remember ? sessionId() : '' }) : {
           gender: state.gender, heightCm: Math.round(state.heightCm), weightKg: Math.round(state.weightKg),
           shape: state.shape, fit: state.fit, remember: state.remember, sessionId: state.remember ? sessionId() : '',
         }),
@@ -849,7 +914,90 @@
     }
 
     // Step 1 for shoes / rings / bangles: drawing, the way to measure, one slider, how-to, remember.
+    // Step 1 for baby & kids clothes: length + weight (or age), fits now / room to grow.
+    function drawBaby(body, foot, err) {
+      body.appendChild(stepper(1, 2));
+      body.appendChild(el('h2', 'ccf-sf-title', BB.title));
+      body.appendChild(el('p', 'ccf-sf-lede', BB.text));
+      var art = el('div', 'ccf-sf-art');
+      art.innerHTML = measureArt('baby', accent);
+      body.appendChild(art);
+      var modes = el('div', 'ccf-sf-modes');
+      modes.setAttribute('role', 'group');
+      modes.setAttribute('aria-label', 'What you know');
+      [['measure', 'Length & weight'], ['age', 'Age only']].forEach(function (m) {
+        var b = button(null, m[1], function () { state.bmode = m[0]; state.live = ''; draw(); estimateSoon(0); });
+        b.setAttribute('aria-pressed', state.bmode === m[0] ? 'true' : 'false');
+        modes.appendChild(b);
+      });
+      body.appendChild(modes);
+      if (state.bmode === 'age') {
+        body.appendChild(measure(BB.age.label, BB.age.min, BB.age.max,
+          function () { return state.bage; }, function (v) { state.bage = v; },
+          function () { return ageText(state.bage); }, null, 'Newborn', '6 years', BB.age.step));
+      } else {
+        body.appendChild(measure(BB.length.label, BB.length.min, BB.length.max,
+          function () { return state.blen; }, function (v) { state.blen = v; },
+          function () { return mText(state.blen, 'cm'); },
+          unitToggle([['cm', 'cm'], ['in', 'in']], state.mUnit, function (u) { state.mUnit = u; }, 'Length unit'),
+          mText(BB.length.min, 'cm'), mText(BB.length.max, 'cm'), BB.length.step));
+        body.appendChild(measure(BB.weight.label, BB.weight.min, BB.weight.max,
+          function () { return state.bwt; }, function (v) { state.bwt = v; },
+          function () { return babyWeightText(state.bwt); },
+          unitToggle([['kg', 'kg'], ['lb', 'lb']], state.wUnit, function (u) { state.wUnit = u; }, 'Weight unit'),
+          babyWeightText(BB.weight.min), babyWeightText(BB.weight.max), BB.weight.step));
+      }
+      var fits = el('div', 'ccf-sf-fitcards');
+      fits.setAttribute('role', 'group');
+      fits.setAttribute('aria-label', 'Fit');
+      [[false, 'Fits now', 'The right size for today'], [true, 'Room to grow', 'One size up, lasts longer']].forEach(function (f) {
+        var b = button(null, null, function () { state.grow = f[0]; draw(); estimateSoon(0); }, f[1]);
+        b.setAttribute('aria-pressed', state.grow === f[0] ? 'true' : 'false');
+        b.appendChild(el('b', null, f[1]));
+        b.appendChild(el('small', null, f[2]));
+        fits.appendChild(b);
+      });
+      body.appendChild(fits);
+      if (opts.liveEstimate) {
+        liveBox = el('div', 'ccf-sf-live');
+        liveBox.setAttribute('aria-live', 'polite');
+        var chip = el('span', null, 'Likely size ');
+        chip.appendChild(el('b', null, state.live || '—'));
+        liveBox.appendChild(chip);
+        body.appendChild(liveBox);
+        paintLive();
+      }
+      if (state.bmode !== 'age' && BB.howTo && BB.howTo.length) {
+        var how = el('details', 'ccf-sf-howto');
+        how.appendChild(el('summary', null, 'How to measure your baby'));
+        var ol = el('ol');
+        BB.howTo.forEach(function (h) { ol.appendChild(el('li', null, h)); });
+        how.appendChild(ol);
+        body.appendChild(how);
+      }
+      if (opts.rememberSize) {
+        var lbl = el('label', 'ccf-sf-check');
+        var txt = el('span');
+        txt.appendChild(el('b', null, 'Remember my baby’s size'));
+        txt.appendChild(el('small', null, 'We save only the size, never the length, weight or age.'));
+        lbl.appendChild(txt);
+        var cb = el('input');
+        cb.type = 'checkbox';
+        cb.checked = state.remember;
+        cb.setAttribute('aria-label', 'Remember my size');
+        cb.addEventListener('change', function () { state.remember = cb.checked; });
+        lbl.appendChild(cb);
+        body.appendChild(lbl);
+      }
+      if (err) foot.appendChild(err);
+      var go2 = button('ccf-sf-main', state.busy ? 'Finding the size…' : 'Find my baby’s size', getSize);
+      go2.disabled = state.busy;
+      foot.appendChild(go2);
+      privacy(foot);
+    }
+
     function drawMeasure(body, foot, err) {
+      if (BB) { drawBaby(body, foot, err); return; }
       body.appendChild(stepper(1, 2));
       body.appendChild(el('h2', 'ccf-sf-title', M.title));
       body.appendChild(el('p', 'ccf-sf-lede', M.text));

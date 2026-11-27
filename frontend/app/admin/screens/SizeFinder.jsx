@@ -46,7 +46,7 @@ export function fitScale(previewHeight, viewportHeight) {
 export default function SizeFinderScreen({ shop }) {
   const [settings, setSettings] = useState(null);
   // From the backend with the settings: search words per store type, and each measure type's words/ranges.
-  const [meta, setMeta] = useState({ storeTypes: [], measureTypes: {} });
+  const [meta, setMeta] = useState({ storeTypes: [], measureTypes: {}, babyType: null });
   const [choosing, setChoosing] = useState(false); // the store-type search is open
   const [lastQuery, setLastQuery] = useState('');
   const [gender, setGender] = useState('women');
@@ -95,7 +95,7 @@ export default function SizeFinderScreen({ shop }) {
     apiGet(`/api/size-finder/${shop}/config`)
       .then((d) => {
         setSettings(d.settings);
-        setMeta({ storeTypes: d.storeTypes || [], measureTypes: d.measureTypes || {} });
+        setMeta({ storeTypes: d.storeTypes || [], measureTypes: d.measureTypes || {}, babyType: d.babyType || null });
       })
       .catch((e) => setLoadError(e.message || 'Could not load the size finder settings'));
   }, [shop]);
@@ -112,14 +112,19 @@ export default function SizeFinderScreen({ shop }) {
   const isOn = storeType !== '' && storeType !== 'none';
   const showPicker = storeType === '' || choosing;
   const measureRows = (measure && settings.measureCharts && settings.measureCharts[storeType]) || [];
-  // Preview screens: clothing 1–5; measure types 1 Measure · 2 Result.
-  const mv = (v) => (measure ? (v >= 4 ? 2 : 1) : v);
+  // Baby & kids clothes: length + weight (or age) → a size; its own 3-column chart.
+  const baby = storeType === 'baby' ? meta.babyType : null;
+  const babyRows = (baby && settings.babyChart) || [];
+  const twoStep = !!(measure || baby); // Measure → Result, instead of the 4-step avatar flow
+  // Preview screens: clothing 1–5; measure and baby types 1 Measure · 2 Result.
+  const mv = (v) => (twoStep ? (v >= 4 ? 2 : 1) : v);
 
   function pickType(id, query) {
     const first = storeType === '';
     // The caption follows the kind of store while the seller hasn't written their own.
-    const captions = [CLOTHING_CAPTION, ...Object.values(meta.measureTypes).map((m) => m.caption)];
-    const nextCaption = meta.measureTypes[id] ? meta.measureTypes[id].caption : CLOTHING_CAPTION;
+    const babyCaption = meta.babyType ? meta.babyType.caption : null;
+    const captions = [CLOTHING_CAPTION, babyCaption, ...Object.values(meta.measureTypes).map((m) => m.caption)].filter(Boolean);
+    const nextCaption = meta.measureTypes[id] ? meta.measureTypes[id].caption : id === 'baby' && babyCaption ? babyCaption : CLOTHING_CAPTION;
     setSettings((s) => ({
       ...s,
       storeType: id,
@@ -129,8 +134,12 @@ export default function SizeFinderScreen({ shop }) {
     setChoosing(false);
     setLastQuery(query || '');
     setMessage('');
-    setPreviewView(meta.measureTypes[id] ? 2 : 5);
+    setPreviewView(meta.measureTypes[id] || id === 'baby' ? 2 : 5);
     setHighlight(null);
+  }
+  function setBabyRows(next) {
+    setSettings((s) => ({ ...s, babyChart: next }));
+    setMessage('');
   }
   function setMeasureRows(next) {
     setSettings((s) => ({ ...s, measureCharts: { ...(s.measureCharts || {}), [storeType]: next } }));
@@ -183,7 +192,7 @@ export default function SizeFinderScreen({ shop }) {
   function setOption(k, v) { set({ options: { ...options, [k]: v } }); }
 
   // Steps on the left, each with a short live status. The preview follows the open step.
-  const chartCount = measure ? measureRows.length : (settings.charts.women || []).length + (settings.charts.men || []).length;
+  const chartCount = baby ? babyRows.length : measure ? measureRows.length : (settings.charts.women || []).length + (settings.charts.men || []).length;
   const featuresOn = Object.keys(ADVISOR_OPTION_DEFAULTS).filter((k) => options[k]).length;
   const wordsChanged = Object.keys(ADVISOR_TEXT_DEFAULTS).filter((k) => settings.texts && typeof settings.texts[k] === 'string'
     && settings.texts[k].trim() && settings.texts[k].trim() !== ADVISOR_TEXT_DEFAULTS[k]).length;
@@ -268,6 +277,8 @@ export default function SizeFinderScreen({ shop }) {
           <p className="sf-subtitle">
             {showPicker
               ? 'Help shoppers pick the right size before they buy, set up for what your store sells.'
+              : baby
+              ? 'Parents enter their baby’s length and weight, or just the age, and get the right size from your chart.'
               : measure
               ? `Shoppers measure their ${measure.value.toLowerCase()} and get the right size from your chart.`
               : storeType === 'clothing'
@@ -461,15 +472,15 @@ export default function SizeFinderScreen({ shop }) {
       <section style={ui.card} aria-label="Shopper features" {...focusArea()}>
         <SectionHead icon="spark" title="Shopper features" text="Choose what shoppers can use in the size helper. The preview shows each change." />
         <div className="sf-features">
-          {featureTile('liveEstimate', measure ? 1 : 2, 'Likely size', measure ? 'Shows a size while shoppers move the slider.' : 'Shows a size while shoppers move the height and weight sliders.', 'eye')}
-          {featureTile('rememberSize', measure ? 1 : 3, '“Remember my size”', 'Saves the size for next time, never the measurements.', 'save')}
+          {featureTile('liveEstimate', twoStep ? 1 : 2, 'Likely size', baby ? 'Shows a size while parents move the length, weight or age sliders.' : measure ? 'Shows a size while shoppers move the slider.' : 'Shows a size while shoppers move the height and weight sliders.', 'eye')}
+          {featureTile('rememberSize', twoStep ? 1 : 3, '“Remember my size”', 'Saves the size for next time, never the measurements.', 'save')}
           {featureTile('addToBag', 5, 'Add to cart button', 'Picks the size and adds it to the cart in one tap.', 'cart')}
           {featureTile('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.', 'table')}
         </div>
       </section>
       )}
 
-      {tab === 'words' && (measure ? (
+      {tab === 'words' && (twoStep ? (
       <section style={ui.card} aria-label="Size helper" {...focusArea()}>
         <SectionHead icon="panel" title="Words" text="Optional. The default words work well; edit any line and the preview jumps to that screen." />
         <p style={{ ...ui.group, borderTop: 0, paddingTop: 0 }}>Panel</p>
@@ -526,7 +537,55 @@ export default function SizeFinderScreen({ shop }) {
       </section>
       ))}
 
-      {tab === 'chart' && (measure ? (
+      {tab === 'chart' && baby && (
+      <section style={ui.card} aria-label="Size chart" {...focusArea()}>
+        <SectionHead icon="chart" title="Size chart" text="What each size fits, smallest first: up to this length, weight and age." />
+        <p style={ui.tip}>
+          A starter chart (Newborn to 3-4 Y) is filled in. Size names must match the sizes on your products, for example “0-3 M”.
+          With length and weight, parents get the smallest size that fits both; with age only, the size for that age.
+        </p>
+        <table style={ui.table} aria-label="Size chart" data-hl="chart" data-hl-label="Size chart">
+          <thead>
+            <tr>
+              <th style={ui.th}>Size</th>
+              {BABY_COLS.map(([, label]) => <th key={label} style={ui.th}>{label}</th>)}
+              <th style={ui.th} />
+            </tr>
+          </thead>
+          <tbody>
+            {babyRows.map((r, i) => (
+              <tr key={i}>
+                <td style={ui.td}>
+                  <input value={r.size} maxLength={10} onChange={(e) => setBabyRows(babyRows.map((x, idx) => (idx === i ? { ...x, size: e.target.value } : x)))} style={ui.cell} aria-label={`Row ${i + 1} size`} />
+                </td>
+                {BABY_COLS.map(([key, label, step]) => (
+                  <td key={key} style={ui.td}>
+                    <input
+                      type="number"
+                      step={step}
+                      value={r[key] === '' || r[key] == null ? '' : r[key]}
+                      onChange={(e) => setBabyRows(babyRows.map((x, idx) => (idx === i ? { ...x, [key]: e.target.value === '' ? '' : Number(e.target.value) } : x)))}
+                      style={ui.cell}
+                      aria-label={`Row ${i + 1} ${label}`}
+                    />
+                  </td>
+                ))}
+                <td style={ui.td}>
+                  <button type="button" onClick={() => setBabyRows(babyRows.filter((_, idx) => idx !== i))} style={ui.remove} aria-label={`Remove row ${i + 1}`}>✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {babyRows.length < 20 && (
+          <button type="button" style={ui.add} data-hl="chart" data-hl-label="Size chart" onClick={() => setBabyRows([...babyRows, { size: '', maxLength: '', maxWeight: '', maxAge: '' }])}>
+            + Add a size
+          </button>
+        )}
+      </section>
+      )}
+
+      {tab === 'chart' && !baby && (measure ? (
       <section style={ui.card} aria-label="Size chart" {...focusArea()}>
         <SectionHead icon="chart" title="Size chart" text={`${measure.value} for each size, in ${measure.unit}, smallest first.`} />
         <p style={ui.tip}>
@@ -683,6 +742,8 @@ export default function SizeFinderScreen({ shop }) {
             storeType={storeType}
             measure={measure}
             measureChart={measureRows}
+            baby={baby}
+            babyChart={babyRows}
           />
         </div>
       </aside>
@@ -694,6 +755,9 @@ export default function SizeFinderScreen({ shop }) {
 
 // Fields whose preview part lives on one step: editing them opens that step.
 const HL_VIEW = { chart: 5, unit: 2 };
+
+// Baby chart columns: [field, label, step].
+const BABY_COLS = [['maxLength', 'Up to length (cm)', 0.5], ['maxWeight', 'Up to weight (kg)', 0.1], ['maxAge', 'Up to age (months)', 1]];
 
 const FEATURE_ICONS = {
   eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,

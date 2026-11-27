@@ -79,11 +79,12 @@ const I = (props) => (
   <svg width={props.s || 14} height={props.s || 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={props.w || 1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{props.children}</svg>
 );
 const TYPE_ICON = {
+  baby: <><path d="M9 3h6l1 3 4 2-2 4-2-1v9H8v-9l-2 1-2-4 4-2z" /><path d="M10 6c.6.7 1.2 1 2 1s1.4-.3 2-1" /></>,
   shoes: <><path d="M3 16.5V8.5c0-.8.7-1.5 1.5-1.5H7l2 3.5c.9 1.6 2.6 2.5 4.4 2.5H15l4 1.2c1.2.4 2 1.4 2 2.6v.7H3z" /><path d="M3 19h18" /></>,
   rings: <><circle cx="12" cy="14.5" r="6" /><path d="M9.5 8.8 8 5.5h8l-1.5 3.3" /><path d="M10 5.5 12 3l2 2.5" /></>,
   bangles: <><ellipse cx="12" cy="12" rx="8.5" ry="4.5" /><ellipse cx="12" cy="12" rx="5.5" ry="2.6" /></>,
 };
-const SAMPLE_PRODUCT = { shoes: 'Canvas Sneakers', rings: 'Silver Band Ring', bangles: 'Gold-plated Bangle Set' };
+const SAMPLE_PRODUCT = { baby: 'Cotton Baby Romper', shoes: 'Canvas Sneakers', rings: 'Silver Band Ring', bangles: 'Gold-plated Bangle Set' };
 const HANGER = <><path d="M12 6a2 2 0 1 1 2 2c-1 .4-2 1-2 2.2V11" /><path d="M12 11 3.5 17a1.5 1.5 0 0 0 .9 2.7h15.2a1.5 1.5 0 0 0 .9-2.7L12 11z" /></>;
 const CHECK = <path d="M5 12l5 5L20 7" />;
 
@@ -150,6 +151,15 @@ export function MeasureArt({ type, h = 78 }) {
           {[0, 1, 2, 3, 4].map((i) => <path key={i} d={`M${107 + i * 9} 40v6`} stroke="#9CA3AF" />)}
         </>
       )}
+      {type === 'baby' && (
+        <>
+          <rect x="8" y="70" width="144" height="12" rx="4" fill="#F3F4F6" stroke="#D1D5DB" />
+          {Array.from({ length: 14 }, (_, i) => <path key={i} d={`M${16 + i * 10} 70v${i % 2 ? 3 : 6}`} stroke="#9CA3AF" />)}
+          <circle cx="34" cy="42" r="11" fill="#F1E4D6" stroke="#D9C2AA" />
+          <path d="M45 34h52c8 0 14 4 18 8l14 2c5 1 5 9 0 10l-14 2c-4 4-10 8-18 8H45c-6 0-9-5-9-15s3-15 9-15z" fill="#DCEBFB" stroke="#A9C7EA" />
+          <path d="M24 62h110" stroke={a} strokeWidth="2" /><path d="M24 58v8M134 58v8" stroke={a} strokeWidth="2" />
+        </>
+      )}
       {type === 'bangles' && (
         <>
           <path d="M52 86V50c0-8 2-14 6-18l4-18c1-5 8-5 9 0l1 12 2-16c1-5 8-5 9 0l1 16 2-14c1-5 8-5 9 0l1 16 2-10c1-5 8-4 8 1l-2 26c0 8-2 14-6 18v23z" fill="#F1E4D6" stroke="#D9C2AA" strokeLinejoin="round" />
@@ -161,7 +171,9 @@ export function MeasureArt({ type, h = 78 }) {
   );
 }
 
-export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth, highlight = null, storeType = 'clothing', measure = null, measureChart = [] }) {
+export default function SizeFinderPreview({ shop, settings, gender: editorGender, view: viewProp, onViewChange, show = 'both', onShowBoth, highlight = null, storeType = 'clothing', measure: measureProp = null, measureChart = [], baby = null, babyChart = [] }) {
+  // Baby & kids clothes use the same 2-screen layout as shoes / rings / bangles, with two sliders (or age).
+  const measure = measureProp || (baby ? { ...baby, value: 'Length', unit: 'cm', start: baby.length.start, min: baby.length.min, max: baby.length.max } : null);
   const isMeasure = !!measure;
   const accent = HEX_RE.test(settings.accentColor || '') ? settings.accentColor : '#111827';
   const genders = ['women', 'men'].filter((g) => (settings.charts[g] || []).length > 0);
@@ -179,7 +191,7 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const chart = isMeasure ? measureChart : (settings.charts[gender] || []);
+  const chart = baby ? babyChart : isMeasure ? measureChart : (settings.charts[gender] || []);
   const chartKey = JSON.stringify(chart);
   const sample = SAMPLE_SHOPPER[gender];
   const hUnit = settings.unit === 'in' ? 'ft' : 'cm';
@@ -198,7 +210,9 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
     const timer = setTimeout(async () => {
       try {
         const d = await apiSend(`/api/size-finder/${shop}/preview`, 'POST', isMeasure
-          ? { storeType, chart, value: measure.start }
+          ? (baby
+            ? { storeType: 'baby', chart, answers: { mode: 'measure', lengthCm: baby.length.start, weightKg: baby.weight.start } }
+            : { storeType, chart, value: measure.start })
           : { chart, answers: { gender, heightCm: sample.heightCm, weightKg: sample.weightKg, shape: 'average', fit: 'regular' } });
         if (!cancelled) { setResult(d); setError(''); }
       } catch (e) {
@@ -274,6 +288,17 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
             {measure.alt && (
               <div className="sfp-modes"><span className="on">Measure yourself</span><span>{measure.alt.label}</span></div>
             )}
+            {baby && <div className="sfp-modes"><span className="on">Length &amp; weight</span><span>Age only</span></div>}
+            {baby ? [['length', 'cm'], ['weight', 'kg']].map(([k, unit]) => {
+              const f = baby[k];
+              const pct = ((f.start - f.min) / (f.max - f.min)) * 100;
+              return (
+                <div key={k} className="sfp-field">
+                  <div className="sfp-frow"><span className="sfp-flabel">{f.label}</span><span className="sfp-fval">{measureLabel(f.start, unit)}</span></div>
+                  <div className="sfp-track"><span style={{ width: `${pct}%` }} /><b style={{ left: `${pct}%` }} /></div>
+                </div>
+              );
+            }) : (
             <div className="sfp-field">
               <div className="sfp-frow">
                 <span className="sfp-flabel">{measure.value}</span>
@@ -282,6 +307,13 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
               <div className="sfp-track"><span style={{ width: `${((measure.start - measure.min) / (measure.max - measure.min)) * 100}%` }} /><b style={{ left: `${((measure.start - measure.min) / (measure.max - measure.min)) * 100}%` }} /></div>
               <div className="sfp-minmax"><span>{measureLabel(measure.min, measure.unit)}</span><span>{measureLabel(measure.max, measure.unit)}</span></div>
             </div>
+            )}
+            {baby && (
+              <div className="sfp-fitcards">
+                <span className="on"><b>Fits now</b><small>The size for today</small></span>
+                <span><b>Room to grow</b><small>One size up</small></span>
+              </div>
+            )}
             {opt.liveEstimate && (
               <div className={`sfp-live${hl('liveEstimate')}`}><span>Likely size <b>{result ? result.size : '—'}</b></span></div>
             )}
@@ -307,14 +339,17 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
                 <div className="sfp-result">
                   <div className="sfp-pvis">
                     <span className="sfp-pimg"><I s={30} w={1.4}>{TYPE_ICON[storeType]}</I></span>
-                    <span className="sfp-me">{measure.value.split(' ')[0]} {measureLabel(measure.start, measure.unit)}</span>
+                    <span className="sfp-me">{baby ? `${measureLabel(baby.length.start, 'cm')} · ${measureLabel(baby.weight.start, 'kg')}` : `${measure.value.split(' ')[0]} ${measureLabel(measure.start, measure.unit)}`}</span>
                   </div>
                   <div>
                     <div className="sfp-prod"><span className="sfp-thumb" /><span><b>{SAMPLE_PRODUCT[storeType]}</b><small>₹1,499</small></span></div>
                     <div className="sfp-hero">
                       <p className={`sfp-rtitle${hl('resultTitle')}`}>{t('resultTitle')}</p>
                       <div className="sfp-big"><b>{result.size}</b><span className="sfp-pill">✓ Best match</span></div>
-                      <p className="sfp-fit">{measure.fit[(result.reasons && result.reasons[0] && result.reasons[0].status) === 'roomy' ? 'roomy' : 'right']}</p>
+                      <p className="sfp-fit">{(() => {
+                        const st = result.reasons && result.reasons[0] && result.reasons[0].status;
+                        return baby ? (baby.fit[st] || baby.fit.right) : measure.fit[st === 'roomy' ? 'roomy' : 'right'];
+                      })()}</p>
                     </div>
                     <p className="sfp-other">Compare sizes</p>
                     <div className={`sfp-sizes${hl('chart')}`}>
@@ -516,7 +551,9 @@ export default function SizeFinderPreview({ shop, settings, gender: editorGender
       </div>
       <p className="sfp-sample">
         {isMeasure
-          ? <>Sample shopper: {measure.value.toLowerCase()} {measureLabel(measure.start, measure.unit)}.</>
+          ? (baby
+            ? <>Sample baby: {measureLabel(baby.length.start, 'cm')} long, {measureLabel(baby.weight.start, 'kg')}.</>
+            : <>Sample shopper: {measure.value.toLowerCase()} {measureLabel(measure.start, measure.unit)}.</>)
           : <>Sample shopper: {gender === 'men' ? 'Men' : 'Women'}, {heightLabel(sample.heightCm, hUnit)}, {weightLabel(sample.weightKg, wUnit)}, balanced build.</>}
       </p>
     </section>
@@ -658,6 +695,11 @@ const CSS = `
 .sfp-modes{display:flex;background:#F1F1F1;border-radius:9px;padding:3px;margin:0 0 8px}
 .sfp-modes span{flex:1;text-align:center;font-size:10px;font-weight:600;color:#6B7280;padding:5px 4px;border-radius:7px}
 .sfp-modes span.on{background:#fff;color:#111;box-shadow:0 1px 2px rgba(0,0,0,.1)}
+.sfp-fitcards{display:flex;gap:6px;margin:8px 0 0}
+.sfp-fitcards span{flex:1;display:flex;flex-direction:column;gap:1px;padding:7px 8px;border:1.5px solid #E5E7EB;border-radius:9px;background:#fff}
+.sfp-fitcards span.on{border-color:var(--sfp-accent);box-shadow:0 0 0 1px var(--sfp-accent)}
+.sfp-fitcards b{font-size:10.5px}
+.sfp-fitcards small{font-size:9px;color:#6B7280}
 .sfp-howto{margin-top:8px;padding:8px 10px;border-radius:10px;background:#F7F7F5;font-size:10px;color:#374151}
 .sfp-howto b{font-size:10.5px}
 .sfp-howto ol{margin:4px 0 0;padding-left:15px;display:flex;flex-direction:column;gap:2px;line-height:1.35}

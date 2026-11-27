@@ -16,7 +16,7 @@ const SizeFinderConfig = require('../models/SizeFinderConfig');
 const { verifyProxySignature } = require('../utils/shopify');
 const {
   publicSettings, withDefaults, sanitizeAnswers, estimateBody, recommendSize,
-  MEASURE_TYPES, sanitizeMeasure, recommendByMeasure,
+  MEASURE_TYPES, sanitizeMeasure, recommendByMeasure, sanitizeBabyAnswers, recommendBaby,
 } = require('../utils/sizeFinder');
 
 const router = express.Router();
@@ -72,10 +72,16 @@ router.post('/recommend', guard, async (req, res) => {
     const doc = await SizeFinderConfig.findOne({ shopDomain: req.shop }).lean();
     const settings = withDefaults(doc);
     if (!settings.enabled) return res.status(404).json({ ok: false, error: 'Size finder is off' });
-    const measured = !!MEASURE_TYPES[settings.storeType];
+    const measured = !!MEASURE_TYPES[settings.storeType] || settings.storeType === 'baby';
     let answers = null;
     let result;
-    if (measured) {
+    if (settings.storeType === 'baby') {
+      // Baby's length + weight, or age: used for the calculation only.
+      const baby = sanitizeBabyAnswers(req.body);
+      if (!baby) return res.status(400).json({ ok: false, error: 'Check your baby’s details and try again.' });
+      if (!settings.babyChart.length) return res.status(400).json({ ok: false, error: 'No size chart yet' });
+      result = recommendBaby(settings.babyChart, baby);
+    } else if (measured) {
       // Shoes / rings / bangles: one measurement, used for the calculation only.
       const value = sanitizeMeasure(req.body, settings.storeType);
       if (value == null) return res.status(400).json({ ok: false, error: 'Check your measurement and try again.' });

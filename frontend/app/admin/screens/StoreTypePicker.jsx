@@ -27,6 +27,7 @@ export function searchStoreTypes(catalog, query) {
 
 const PATHS = {
   clothing: <path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z" />,
+  baby: <><path d="M9 3h6l1 3 4 2-2 4-2-1v9H8v-9l-2 1-2-4 4-2z" /><path d="M10 6c.6.7 1.2 1 2 1s1.4-.3 2-1" /></>,
   shoes: <><path d="M3 16.5V8.5c0-.8.7-1.5 1.5-1.5H7l2 3.5c.9 1.6 2.6 2.5 4.4 2.5H15l4 1.2c1.2.4 2 1.4 2 2.6v.7H3z" /><path d="M3 19h18" /></>,
   rings: <><circle cx="12" cy="14.5" r="6" /><path d="M9.5 8.8 8 5.5h8l-1.5 3.3" /><path d="M10 5.5 12 3l2 2.5" /></>,
   bangles: <><ellipse cx="12" cy="12" rx="8.5" ry="4.5" /><ellipse cx="12" cy="12" rx="5.5" ry="2.6" /></>,
@@ -34,6 +35,7 @@ const PATHS = {
 };
 const TINTS = {
   clothing: ['#EEF2FF', '#4338CA'],
+  baby: ['#EFF6FF', '#1D4ED8'],
   shoes: ['#ECFDF5', '#047857'],
   rings: ['#FFF7ED', '#C2410C'],
   bangles: ['#FDF2F8', '#BE185D'],
@@ -48,7 +50,7 @@ export function TypeIcon({ id, size = 40 }) {
   );
 }
 
-const TRY = ['Kurta', 'Sneakers', 'Rings', 'Bangles', 'Mobile phones'];
+const TRY = ['Kurta', 'Baby clothes', 'Sneakers', 'Rings', 'Mobile phones'];
 
 export default function StoreTypePicker({ catalog, current, onPick, onCancel }) {
   const [query, setQuery] = useState('');

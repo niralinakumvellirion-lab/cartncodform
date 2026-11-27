@@ -402,7 +402,8 @@ describe('store types', () => {
     SizeFinderConfig.findOne.mockReturnValue(lean(null));
     const got = await run(adminRouter, '/:shopDomain/config', 'get', { params: {} });
     expect(got.body.settings.storeType).toBe('');
-    expect(got.body.storeTypes.map((t) => t.id)).toEqual(['clothing', 'shoes', 'rings', 'bangles', 'none']);
+    expect(got.body.storeTypes.map((t) => t.id)).toEqual(['clothing', 'baby', 'shoes', 'rings', 'bangles', 'none']);
+    expect(got.body.babyType).toMatchObject({ title: 'Tell us about your baby', length: { min: 40, max: 120 } });
     expect(got.body.measureTypes.shoes).toMatchObject({ unit: 'cm', value: 'Foot length' });
     SizeFinderConfig.findOneAndUpdate.mockReturnValue(lean({ enabled: true, storeType: 'bangles' }));
     const put = await run(adminRouter, '/:shopDomain/config', 'put', {
@@ -440,5 +441,72 @@ describe('store types', () => {
     SizeFinderConfig.findOne.mockReturnValue(lean({ enabled: true, storeType: 'none' }));
     expect((await run(proxyRouter, '/recommend', 'post', req({ value: 26 }))).statusCode).toBe(404);
     expect((await run(proxyRouter, '/config', 'get', req())).body.settings.enabled).toBe(false);
+  });
+});
+
+// ── Phase 11: baby & kids clothes ─────────────────────────────────────────────
+
+describe('baby clothes', () => {
+  const req = (body) => ({ query: { shop: 'demo.myshopify.com', signature: 'x' }, body, ip: '7.7.7.7' });
+  beforeEach(() => proxyRouter._limiter.reset());
+  const chart = S.DEFAULT_BABY_CHART;
+
+  test('search: baby words find Baby; "kids wear" moved from Clothing', () => {
+    const find = (q) => S.STORE_TYPE_CATALOG.filter((t) => t.words.some((w) => w.includes(q))).map((t) => t.id);
+    expect(find('onesie')).toEqual(['baby']);
+    expect(find('newborn')).toEqual(['baby']);
+    expect(find('jhabla')).toEqual(['baby']);
+    expect(find('kids wear')).toEqual(['baby']);
+  });
+
+  test('length + weight → smallest size covering both; the bigger need wins', () => {
+    expect(S.recommendBaby(chart, { mode: 'measure', lengthCm: 66, weightKg: 7 })).toMatchObject({ size: '3-6 M', outOfRange: false, reasons: [{ status: 'right', basis: 'measure' }] });
+    expect(S.recommendBaby(chart, { mode: 'measure', lengthCm: 60, weightKg: 8.5 }).size).toBe('6-9 M'); // heavy for length
+    expect(S.recommendBaby(chart, { mode: 'measure', lengthCm: 110, weightKg: 18 })).toMatchObject({ size: '3-4 Y', outOfRange: true });
+  });
+
+  test('age → the size for that age (up to, not including, its max); room to grow = one size up', () => {
+    expect(S.recommendBaby(chart, { mode: 'age', ageMonths: 0 }).size).toBe('Newborn');
+    expect(S.recommendBaby(chart, { mode: 'age', ageMonths: 3 }).size).toBe('3-6 M');
+    expect(S.recommendBaby(chart, { mode: 'age', ageMonths: 7 })).toMatchObject({ size: '6-9 M', reasons: [{ status: 'age', basis: 'age' }] });
+    expect(S.recommendBaby(chart, { mode: 'age', ageMonths: 7, grow: true })).toMatchObject({ size: '9-12 M', reasons: [{ status: 'grow' }] });
+    expect(S.recommendBaby(chart, { mode: 'age', ageMonths: 47, grow: true }).size).toBe('3-4 Y'); // nothing bigger
+  });
+
+  test('answers: ranges checked; age mode needs an age', () => {
+    expect(S.sanitizeBabyAnswers({ lengthCm: 30, weightKg: 5 })).toBeNull();
+    expect(S.sanitizeBabyAnswers({ lengthCm: 70, weightKg: 50 })).toBeNull();
+    expect(S.sanitizeBabyAnswers({ mode: 'age' })).toBeNull();
+    expect(S.sanitizeBabyAnswers({ mode: 'age', ageMonths: '7', grow: true })).toEqual({ mode: 'age', ageMonths: 7, grow: true });
+    expect(S.sanitizeBabyAnswers({ lengthCm: '70.04', weightKg: 8 })).toEqual({ mode: 'measure', lengthCm: 70, weightKg: 8, grow: false });
+  });
+
+  test('chart: validated; saved with the type; public settings carry the words + chart', () => {
+    expect(() => S.sanitizeBabyChart([{ size: 'A', maxLength: 60, maxWeight: 5, maxAge: 3 }, { size: 'B', maxLength: 58, maxWeight: 6, maxAge: 6 }])).toThrow(/bigger than the size above/);
+    expect(() => S.sanitizeBabyChart([{ size: 'A', maxLength: 60, maxWeight: 5, maxAge: 0 }])).toThrow(/age must be 1–72/);
+    expect(() => S.sanitizeSettings({ storeType: 'baby', babyChart: [] })).toThrow(/at least one size/);
+    const saved = S.sanitizeSettings({ storeType: 'baby', enabled: true, babyChart: [{ size: ' 0-3 M ', maxLength: '62', maxWeight: 6, maxAge: 3 }] });
+    expect(saved.babyChart).toEqual([{ size: '0-3 M', maxLength: 62, maxWeight: 6, maxAge: 3 }]);
+    expect(S.withDefaults(null).babyChart).toHaveLength(9);
+    const pub = S.publicSettings({ enabled: true, storeType: 'baby' });
+    expect(pub.baby).toMatchObject({ title: 'Tell us about your baby', chart: expect.any(Array) });
+    expect(pub.measure).toBeNull();
+    expect(pub.genders).toEqual([]);
+    expect(pub.cardText).toBe('Baby’s size in 20 seconds');
+  });
+
+  test('admin preview and storefront: baby answers → size; remember saves size + kind only', async () => {
+    const pre = await run(adminRouter, '/:shopDomain/preview', 'post', { params: {}, body: { storeType: 'baby', chart, answers: { lengthCm: 68, weightKg: 8 } } });
+    expect(pre.body).toMatchObject({ size: '3-6 M', outOfRange: false });
+    const bad = await run(adminRouter, '/:shopDomain/preview', 'post', { params: {}, body: { storeType: 'baby', chart, answers: { mode: 'age' } } });
+    expect(bad.statusCode).toBe(400);
+
+    SizeFinderConfig.findOne.mockReturnValue(lean({ enabled: true, storeType: 'baby' }));
+    const res = await run(proxyRouter, '/recommend', 'post', req({ mode: 'age', ageMonths: 10, grow: true, remember: true, sessionId: 'abc12345-session' }));
+    expect(res.body).toMatchObject({ ok: true, size: '12-18 M', saved: true });
+    const [, , updates] = upsertProfile.mock.calls.at(-1);
+    const { 'sizeProfile.updatedAt': when, ...stored } = updates;
+    expect(stored).toEqual({ 'sizeProfile.size': '12-18 M', 'sizeProfile.gender': null, 'sizeProfile.fit': null, 'sizeProfile.kind': 'baby' });
+    expect((await run(proxyRouter, '/recommend', 'post', req({ lengthCm: 10, weightKg: 1 }))).statusCode).toBe(400);
   });
 });

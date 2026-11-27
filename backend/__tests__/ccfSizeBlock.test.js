@@ -532,3 +532,94 @@ describe('ccf-size.js — measure stores', () => {
     expect(q('#ccf-sf-root')).toBeNull();
   });
 });
+
+// ── Phase 11: baby & kids clothes ─────────────────────────────────────────────
+
+describe('ccf-size.js — baby clothes', () => {
+  const BABY = {
+    title: 'Tell us about your baby', text: 'Length and weight give the best fit.',
+    howTo: ['Lay flat.', 'Head to heel.', 'Recent weight.'], caption: 'Baby’s size in 20 seconds',
+    length: { label: 'Length (head to heel)', min: 40, max: 120, step: 0.5, start: 68 },
+    weight: { label: 'Weight', min: 1.5, max: 30, step: 0.1, start: 8 },
+    age: { label: 'Age', min: 0, max: 72, step: 1, start: 6 },
+    fit: { right: 'Fits now — within this size for length and weight', grow: 'Room to grow — one size up', age: 'Based on age' },
+    chart: [
+      { size: '0-3 M', maxLength: 62, maxWeight: 6, maxAge: 3 },
+      { size: '3-6 M', maxLength: 68, maxWeight: 8, maxAge: 6 },
+      { size: '6-9 M', maxLength: 74, maxWeight: 9.5, maxAge: 9 },
+    ],
+  };
+  const PAGE = `
+    <div class="shopify-section">
+      <form action="/cart/add">
+        <fieldset><legend>Size</legend>
+          <input type="radio" name="Size" value="0-3 M" checked><input type="radio" name="Size" value="3-6 M"><input type="radio" name="Size" value="6-9 M">
+        </fieldset>
+        <button type="submit" name="add">Add to cart</button>
+      </form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size"
+           data-size-values="0-3 M|3-6 M|6-9 M" data-product-title="Cotton Romper" data-product-price="₹699"
+           data-product-image="//cdn.shopify.com/r.jpg" data-design-mode="false"></div>
+    </div>`;
+  const settings = { ...SETTINGS, storeType: 'baby', genders: [], cardText: BABY.caption, measure: null, baby: BABY };
+  const ok = (size, status) => ({ ok: true, size, outOfRange: false, reasons: [{ area: 'fit', status, basis: 'measure' }] });
+
+  test('button with the baby caption; step 1: drawing, Length & weight / Age only, two sliders, fit cards, how-to', async () => {
+    await load({ settings, pageHtml: PAGE, recommend: ok('3-6 M', 'right') });
+    expect(q('.ccf-sf-caption').textContent).toBe('Baby’s size in 20 seconds');
+    open();
+    expect(q('.ccf-sf-title').textContent).toBe('Tell us about your baby');
+    expect(q('.ccf-sf-stepper').getAttribute('aria-label')).toBe('Step 1 of 2');
+    expect(q('.ccf-sf-art svg')).not.toBeNull();
+    expect(btn('Length & weight').getAttribute('aria-pressed')).toBe('true');
+    expect(Array.from(document.querySelectorAll('.ccf-sf-flabel')).map((e) => e.firstChild.textContent)).toEqual(['Length (head to heel)', 'Weight']);
+    expect(Array.from(document.querySelectorAll('.ccf-sf-fval')).map((e) => e.textContent)).toEqual(['68 cm', '8 kg']);
+    btn('lb').click();
+    expect(Array.from(document.querySelectorAll('.ccf-sf-fval')).map((e) => e.textContent)).toEqual(['68 cm', '17.6 lb']);
+    expect(btn('Fits now').getAttribute('aria-pressed')).toBe('true');
+    expect(q('.ccf-sf-howto summary').textContent).toBe('How to measure your baby');
+    btn('Age only').click();
+    expect(q('.ccf-sf-flabel').firstChild.textContent).toBe('Age');
+    expect(q('.ccf-sf-fval').textContent).toBe('6 months');
+    expect(q('.ccf-sf-howto')).toBeNull();
+  });
+
+  test('length + weight → size; result with the picture, measurements, fit line, chart', async () => {
+    await load({ settings, pageHtml: PAGE, recommend: ok('3-6 M', 'right') });
+    open();
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1)).toEqual({ mode: 'measure', lengthCm: 68, weightKg: 8, grow: false, remember: false, sessionId: '' });
+    expect(q('.ccf-sf-big b').textContent).toBe('3-6 M');
+    expect(q('.ccf-sf-fit').textContent).toBe('Fits now — within this size for length and weight');
+    expect(q('.ccf-sf-me').textContent).toBe('68 cm · 8 kg');
+    expect(q('.ccf-sf-pvis img').src).toBe('https://cdn.shopify.com/r.jpg');
+    btn('View size chart').click();
+    expect(Array.from(document.querySelectorAll('.ccf-sf-table th')).map((x) => x.textContent)).toEqual(['Size', 'Length (cm)', 'Weight (kg)', 'Age']);
+    expect(q('.ccf-sf-table tr.is-you').textContent).toBe('3-6 Mup to 68up to 83–6 m');
+  });
+
+  test('age + room to grow → sends age and grow; fit line says room to grow', async () => {
+    await load({ settings, pageHtml: PAGE, recommend: ok('6-9 M', 'grow') });
+    open();
+    btn('Age only').click();
+    btn('Room to grow').click();
+    expect(btn('Room to grow').getAttribute('aria-pressed')).toBe('true');
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1)).toEqual({ mode: 'age', ageMonths: 6, grow: true, remember: false, sessionId: '' });
+    expect(q('.ccf-sf-fit').textContent).toBe('Room to grow — one size up');
+    expect(q('.ccf-sf-me').textContent).toBe('Age 6 months');
+  });
+
+  test('remember: the answers stay on this device; only the size goes to the server', async () => {
+    await load({ settings, pageHtml: PAGE, recommend: ok('3-6 M', 'right') });
+    open();
+    q('.ccf-sf-check input').click();
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(recommendBodies.at(-1)).toMatchObject({ remember: true });
+    const stored = JSON.parse(localStorage.getItem('ccf_size_answers_demo.myshopify.com'));
+    expect(stored).toMatchObject({ blen: 68, bwt: 8, bmode: 'measure', grow: false });
+  });
+});

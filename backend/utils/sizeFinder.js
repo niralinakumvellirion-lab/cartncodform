@@ -45,7 +45,35 @@ const COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
  * Kinds of store. clothing = height/weight/build → body chart. shoes / rings / bangles = one measurement
  * → a one-column chart (smallest size whose value covers it). none = sizes not needed (feature off).
  */
-const STORE_TYPES = ['clothing', 'shoes', 'rings', 'bangles', 'none'];
+const STORE_TYPES = ['clothing', 'baby', 'shoes', 'rings', 'bangles', 'none'];
+
+/**
+ * Baby & kids clothes: sized by the baby's length (head to heel) and weight, or by age alone.
+ * Chart rows: { size, maxLength cm, maxWeight kg, maxAge months } — each size covers up to those values.
+ * "Room to grow" = one size up. The words and ranges below go to the storefront and admin preview.
+ */
+const BABY = Object.freeze({
+  title: 'Tell us about your baby',
+  text: 'Length and weight give the best fit. No measurements handy? Use their age.',
+  howTo: [
+    'Lay your baby on their back on a flat bed or mat.',
+    'Gently straighten their legs and measure from the top of the head to the heel.',
+    'Use a recent weight from a check-up or a home scale.',
+  ],
+  caption: 'Baby’s size in 20 seconds',
+  length: { label: 'Length (head to heel)', min: 40, max: 120, step: 0.5, start: 68 },
+  weight: { label: 'Weight', min: 1.5, max: 30, step: 0.1, start: 8 },
+  age: { label: 'Age', min: 0, max: 72, step: 1, start: 6 },
+  fit: {
+    right: 'Fits now — within this size for length and weight',
+    grow: 'Room to grow — one size up, so it lasts a few more months',
+    age: 'Based on age — add length and weight for a closer fit',
+  },
+});
+const DEFAULT_BABY_CHART = Object.freeze([
+  ['Newborn', 56, 4.5, 1], ['0-3 M', 62, 6, 3], ['3-6 M', 68, 8, 6], ['6-9 M', 74, 9.5, 9], ['9-12 M', 80, 10.5, 12],
+  ['12-18 M', 86, 12, 18], ['18-24 M', 92, 13.5, 24], ['2-3 Y', 98, 15.5, 36], ['3-4 Y', 104, 17.5, 48],
+].map(([size, maxLength, maxWeight, maxAge]) => ({ size, maxLength, maxWeight, maxAge })));
 /**
  * One-measurement kinds. value = what the chart column holds; min/max = allowed range (chart and shopper);
  * tolerance = up to this much bigger than the shopper still counts as "just right".
@@ -100,8 +128,14 @@ const STORE_TYPE_CATALOG = Object.freeze([
     id: 'clothing', name: 'Clothing', blurb: 'Height, weight and build → S, M, L, XL',
     words: ['clothing', 'clothes', 'apparel', 'fashion', 'garments', 'kurta', 'kurti', 'saree', 'sari', 'lehenga', 'salwar suit', 'ethnic wear',
       'western wear', 't-shirt', 'tshirt', 'shirt', 'top', 'dress', 'jeans', 'trousers', 'pants', 'shorts', 'hoodie', 'sweatshirt', 'jacket',
-      'blazer', 'sweater', 'co-ord set', 'nightwear', 'loungewear', 'activewear', 'gym wear', 'sportswear', 'kids wear', 'menswear', 'womenswear',
+      'blazer', 'sweater', 'co-ord set', 'nightwear', 'loungewear', 'activewear', 'gym wear', 'sportswear', 'menswear', 'womenswear',
       'uniform', 'sherwani', 'dupatta', 'blouse', 'skirt', 'jumpsuit'],
+  },
+  {
+    id: 'baby', name: 'Baby & kids clothes', blurb: 'Length, weight or age → Newborn, 0-3 M … 3-4 Y',
+    words: ['baby clothes', 'baby', 'babies', 'baby wear', 'babywear', 'newborn', 'infant', 'toddler', 'kids wear', 'kidswear',
+      'kids clothes', 'onesie', 'romper', 'bodysuit', 'jhabla', 'jabla', 'sleepsuit', 'baby frock', 'baby dress', 'baby set',
+      'nappy', 'baby nightwear', 'baby kurta', 'baby girl', 'baby boy', 'children', 'kids'],
   },
   {
     id: 'shoes', name: 'Shoes & footwear', blurb: 'Foot length → UK / India shoe size',
@@ -212,6 +246,78 @@ function storeTypeOf(doc) {
   return STORE_TYPES.includes(doc.storeType) ? doc.storeType : (doc.storeType === '' ? '' : 'clothing');
 }
 
+/**
+ * Baby chart: 1–20 rows of { size, maxLength 40–120 cm, maxWeight 1.5–30 kg, maxAge 1–72 months },
+ * sizes unique, each value bigger than the size above.
+ */
+function sanitizeBabyChart(raw) {
+  const field = 'babyChart';
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw validationError('The size chart must be a list', field);
+  if (raw.length > 20) throw validationError('The size chart can have at most 20 sizes', field);
+  const out = [];
+  const seen = new Set();
+  raw.forEach((r, i) => {
+    const size = String((r && r.size) || '').trim().slice(0, 10);
+    const maxLength = num(r && r.maxLength);
+    const maxWeight = num(r && r.maxWeight);
+    const maxAge = Math.round(Number(r && r.maxAge));
+    const where = `${field}[${i}]`;
+    if (!size) throw validationError(`Row ${i + 1}: size name is required`, where);
+    if (seen.has(size.toLowerCase())) throw validationError(`Row ${i + 1}: size ${size} is listed twice`, where);
+    seen.add(size.toLowerCase());
+    if (!(maxLength >= 40 && maxLength <= 120)) throw validationError(`Row ${i + 1}: length must be 40–120 cm`, where);
+    if (!(maxWeight >= 1.5 && maxWeight <= 30)) throw validationError(`Row ${i + 1}: weight must be 1.5–30 kg`, where);
+    if (!(maxAge >= 1 && maxAge <= 72)) throw validationError(`Row ${i + 1}: age must be 1–72 months`, where);
+    const prev = out[i - 1];
+    if (prev && (maxLength <= prev.maxLength || maxWeight <= prev.maxWeight || maxAge <= prev.maxAge)) {
+      throw validationError(`Row ${i + 1}: length, weight and age must all be bigger than the size above`, where);
+    }
+    out.push({ size, maxLength, maxWeight, maxAge });
+  });
+  return out;
+}
+function cleanBabyRow(r) {
+  return { size: String(r.size), maxLength: Number(r.maxLength), maxWeight: Number(r.maxWeight), maxAge: Number(r.maxAge) };
+}
+
+/**
+ * Shopper answers for a baby: { mode: 'measure', lengthCm, weightKg } or { mode: 'age', ageMonths },
+ * plus grow (room to grow). Null when out of range.
+ */
+function sanitizeBabyAnswers(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const grow = r.grow === true;
+  if (r.mode === 'age') {
+    const ageMonths = Math.round(Number(r.ageMonths));
+    if (!(ageMonths >= BABY.age.min && ageMonths <= BABY.age.max) || r.ageMonths === '' || r.ageMonths == null) return null;
+    return { mode: 'age', ageMonths, grow };
+  }
+  const lengthCm = num(r.lengthCm);
+  const weightKg = num(r.weightKg);
+  if (!(lengthCm >= BABY.length.min && lengthCm <= BABY.length.max)) return null;
+  if (!(weightKg >= BABY.weight.min && weightKg <= BABY.weight.max)) return null;
+  return { mode: 'measure', lengthCm, weightKg, grow };
+}
+
+/**
+ * Length + weight → the smallest size that covers both. Age → the size whose age range holds it
+ * (a size covers up to, not including, its maxAge). Grow → one size up when there is one.
+ * Bigger than the chart → the largest size, flagged.
+ */
+function recommendBaby(chart, answers) {
+  if (!Array.isArray(chart) || !chart.length || !answers) return null;
+  let at = answers.mode === 'age'
+    ? chart.findIndex((r) => answers.ageMonths < r.maxAge)
+    : chart.findIndex((r) => r.maxLength >= answers.lengthCm && r.maxWeight >= answers.weightKg);
+  const outOfRange = at === -1;
+  if (outOfRange) at = chart.length - 1;
+  const grew = answers.grow && !outOfRange && at < chart.length - 1;
+  if (grew) at += 1;
+  const status = grew ? 'grow' : answers.mode === 'age' ? 'age' : 'right';
+  return { size: chart[at].size, outOfRange, reasons: [{ area: 'fit', status, basis: answers.mode }] };
+}
+
 /** Text on the product-page card, when the store has not changed it. */
 const CARD_DEFAULTS = { cardTitle: 'Not sure about your size?', cardText: '3 quick questions · takes 20 seconds' };
 const BUTTON_STYLES = ['filled', 'outline', 'soft'];
@@ -287,6 +393,7 @@ function sanitizeSettings(raw) {
       ? sanitizeMeasureChart(r.measureCharts[t], t)
       : DEFAULT_MEASURE_CHARTS[t].map(cleanMeasureRow);
   });
+  const babyChart = r.babyChart !== undefined ? sanitizeBabyChart(r.babyChart) : DEFAULT_BABY_CHART.map(cleanBabyRow);
   const out = {
     storeType,
     enabled: r.enabled === true && storeType !== 'none',
@@ -305,7 +412,11 @@ function sanitizeSettings(raw) {
       men: sanitizeChart(r.charts && r.charts.men, 'men'),
     },
     measureCharts,
+    babyChart,
   };
+  if (storeType === 'baby' && !babyChart.length) {
+    throw validationError('Add at least one size to the size chart', 'babyChart');
+  }
   if (storeType === 'clothing' && !out.charts.women.length && !out.charts.men.length) {
     throw validationError('Add at least one size chart (Women or Men)', 'charts');
   }
@@ -338,6 +449,7 @@ function withDefaults(doc) {
       men: Array.isArray(charts.men) ? charts.men.map(cleanRow) : DEFAULT_CHARTS.men.map(cleanRow),
     },
     measureCharts: measureChartsWithDefaults(d.measureCharts),
+    babyChart: Array.isArray(d.babyChart) ? d.babyChart.map(cleanBabyRow) : DEFAULT_BABY_CHART.map(cleanBabyRow),
   };
 }
 
@@ -348,7 +460,7 @@ function cleanRow(r) {
 /** What the storefront may see (no internal ids). */
 function publicSettings(doc) {
   const s = withDefaults(doc);
-  const m = MEASURE_TYPES[s.storeType];
+  const m = MEASURE_TYPES[s.storeType] || (s.storeType === 'baby' ? BABY : null);
   return {
     storeType: s.storeType,
     enabled: s.enabled,
@@ -365,7 +477,8 @@ function publicSettings(doc) {
     unit: s.unit,
     genders: s.storeType === 'clothing' ? GENDERS.filter((g) => s.charts[g].length > 0) : [],
     charts: s.charts,
-    measure: m ? { type: s.storeType, ...publicMeasure(s.storeType), chart: s.measureCharts[s.storeType] } : null,
+    measure: MEASURE_TYPES[s.storeType] ? { type: s.storeType, ...publicMeasure(s.storeType), chart: s.measureCharts[s.storeType] } : null,
+    baby: s.storeType === 'baby' ? { ...BABY, chart: s.babyChart } : null,
   };
 }
 
@@ -463,7 +576,8 @@ function recommendSize(chart, body, fit) {
 
 module.exports = {
   GENDERS, SHAPES, FITS, DEFAULT_CHARTS, CARD_DEFAULTS, BUTTON_STYLES, MAX_RADIUS, ADVISOR_TEXTS, ADVISOR_OPTIONS,
-  STORE_TYPES, MEASURE_TYPES, DEFAULT_MEASURE_CHARTS, STORE_TYPE_CATALOG,
+  STORE_TYPES, MEASURE_TYPES, DEFAULT_MEASURE_CHARTS, STORE_TYPE_CATALOG, BABY, DEFAULT_BABY_CHART,
+  sanitizeBabyChart, sanitizeBabyAnswers, recommendBaby,
   sanitizeChart, sanitizeMeasureChart, sanitizeSettings, withDefaults, publicSettings, publicMeasure,
   sanitizeAnswers, estimateBody, recommendSize, sanitizeMeasure, recommendByMeasure,
 };

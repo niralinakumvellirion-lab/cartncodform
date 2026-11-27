@@ -20,7 +20,7 @@ const measureRowSchema = new mongoose.Schema({
 const sizeFinderConfigSchema = new mongoose.Schema({
   shopDomain:  { type: String, required: true, lowercase: true, trim: true },
   // clothing | shoes | rings | bangles | none. Missing on settings saved before store types = clothing.
-  storeType:   { type: String, enum: ['', 'clothing', 'shoes', 'rings', 'bangles', 'none'] },
+  storeType:   { type: String, enum: ['', 'clothing', 'baby', 'shoes', 'rings', 'bangles', 'none'] },
   enabled:     { type: Boolean, default: false },
   productTag:  { type: String, default: '' },          // '' = every product with a Size option
   buttonText:  { type: String, default: 'Find my size' },
@@ -35,6 +35,16 @@ const sizeFinderConfigSchema = new mongoose.Schema({
   charts: {
     women: { type: [rowSchema], default: undefined },
     men:   { type: [rowSchema], default: undefined },
+  },
+  // Baby & kids clothes: each size covers up to this length (cm), weight (kg) and age (months).
+  babyChart: {
+    type: [new mongoose.Schema({
+      size:      { type: String, required: true },
+      maxLength: { type: Number, required: true },
+      maxWeight: { type: Number, required: true },
+      maxAge:    { type: Number, required: true },
+    }, { _id: false })],
+    default: undefined,
   },
   measureCharts: {
     shoes:   { type: [measureRowSchema], default: undefined },
