@@ -274,6 +274,8 @@
       '.ccf-sf-pvis.is-shoe{flex-direction:column;justify-content:center;gap:10px;padding:46px 12px 44px}',
       '.ccf-sf-pvis .ccf-sf-shoe{width:100%;max-width:250px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
       '.ccf-sf-toe{width:100%;max-width:220px}',
+      '.ccf-sf-pvis.is-bangle{flex-direction:column;justify-content:center;gap:8px;padding:40px 12px 44px}',
+      '.ccf-sf-pvis .ccf-sf-bangle{width:100%;max-width:140px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
       '.ccf-sf-pvis.is-ring{flex-direction:column;justify-content:center;gap:8px;padding:40px 12px 44px}',
       '.ccf-sf-pvis .ccf-sf-ring{width:100%;max-width:150px;height:auto;filter:drop-shadow(0 4px 8px rgba(0,0,0,.08))}',
       '.ccf-sf-toebar{position:relative;display:flex;height:6px;border-radius:6px;overflow:visible;gap:2px}',
@@ -692,6 +694,88 @@
     return meter;
   }
 
+  // ── Bangles worn on a wrist (bangles & bracelets stores) ──
+  // viewBox 160×190: a hand (fingers together, thumb tucked) and forearm; bangles around the wrist with the
+  // back half behind the arm and the front half over it, filled with the product photo plus a shine.
+  var BANGLE_WORDS = [
+    ['bracelet', ['bracelet', 'bracelets', 'chain', 'charm', 'tennis', 'link', 'beaded', 'rakhi']],
+    ['kada', ['kada', 'kadas', 'kara', 'cuff', 'cuffs', 'kangan', 'broad', 'thick']],
+    ['set', ['set', 'sets', 'chudi', 'churi', 'chooda', 'chura', 'glass', 'lac', 'pair', 'stack']],
+    ['bangle', ['bangle', 'bangles']],
+  ];
+  function bangleKind(title, type, tags) {
+    var t = ' ' + [title, type, tags].join(' ').toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
+    for (var i = 0; i < BANGLE_WORDS.length; i++) {
+      for (var j = 0; j < BANGLE_WORDS[i][1].length; j++) {
+        if (t.indexOf(' ' + BANGLE_WORDS[i][1][j] + ' ') !== -1) return BANGLE_WORDS[i][0];
+      }
+    }
+    return 'bangle';
+  }
+  // bangle = { kind, image, fit } — fit: −2…2 steps from the recommended size (a size bigger / smaller).
+  function bangleSvg(b) {
+    var n = Math.floor(Math.random() * 1e6);
+    var fab = 'ccfsfbfab' + n, shine = 'ccfsfbsh' + n, skin = 'ccfsfbskin' + n;
+    var f = Math.max(-2, Math.min(2, b.fit || 0));
+    var k = 1 + 0.04 * f;
+    var cx = 80, rx = 34 * k, ry = 8.5 * k;
+    // One band: back (top) half or front (bottom) half of an elliptical ring, thickness w.
+    var band = function (cy, w, top) {
+      var so = top ? 1 : 0, si = top ? 0 : 1;
+      return 'M' + (cx - rx) + ' ' + cy + 'A' + rx + ' ' + ry + ' 0 0 ' + so + ' ' + (cx + rx) + ' ' + cy +
+        'L' + (cx + rx) + ' ' + (cy + w) + 'A' + rx + ' ' + ry + ' 0 0 ' + si + ' ' + (cx - rx) + ' ' + (cy + w) + 'Z';
+    };
+    var rows = b.kind === 'set' ? [[114, 3.2], [121, 3.2], [128, 3.2], [135, 3.2]]
+      : b.kind === 'kada' ? [[116, 12]]
+      : b.kind === 'bracelet' ? [[122, 3.5]]
+      : [[120, 6]];
+    var defs = '<defs>' +
+      '<pattern id="' + fab + '" patternContentUnits="objectBoundingBox" width="1" height="1">' +
+        '<rect width="1" height="1" fill="#D4AF6A"/>' +
+        (b.image ? '<image href="' + attr(b.image) + '" x="-1" y="-1" width="3" height="3" preserveAspectRatio="xMidYMid slice"/>' : '') +
+      '</pattern>' +
+      '<linearGradient id="' + shine + '" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="#fff" stop-opacity=".6"/><stop offset=".4" stop-color="#fff" stop-opacity=".08"/>' +
+        '<stop offset="1" stop-color="#000" stop-opacity=".3"/></linearGradient>' +
+      '<linearGradient id="' + skin + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#E3CBB2"/>' +
+        '<stop offset=".45" stop-color="#F4E6D7"/><stop offset="1" stop-color="#DCC1A6"/></linearGradient>' +
+      '</defs>';
+    var out = '<svg class="ccf-sf-bangle" data-kind="' + b.kind + '" viewBox="0 0 160 190" aria-hidden="true">' + defs;
+    rows.forEach(function (row) { // backs, behind the arm
+      out += '<path d="' + band(row[0], row[1], true) + '" fill="url(#' + fab + ')"/>' +
+        '<path d="' + band(row[0], row[1], true) + '" fill="#000" fill-opacity=".3"/>';
+    });
+    // forearm + hand (fingers together, thumb tucked), knuckle and wrist creases
+    out += '<path d="M60 190V112C60 104 58 98 56 92L50 58C48 46 50 36 54 28L57 14C58 9 63 7 66 10L68 22L70 8C71 3 77 3 78 8L79 22L81 6C82 1 88 1 89 6L90 22L92 9C93 4 99 5 99 10L98 30C104 34 108 40 107 48L104 90C102 98 100 104 100 112V190Z" fill="url(#' + skin + ')" stroke="#C9AE93" stroke-width="1"/>' +
+      '<path d="M57 64C66 58 72 58 78 63M66 40H74M77 38H86M88 40H96M60 100C72 103 88 103 100 100" fill="none" stroke="#C9AE93" stroke-width=".9" stroke-linecap="round"/>';
+    rows.forEach(function (row) { // fronts, over the arm
+      var d = band(row[0], row[1], false);
+      out += '<path d="' + d + '" fill="url(#' + fab + ')"/><path d="' + d + '" fill="url(#' + shine + ')"/>' +
+        '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".3" stroke-width=".7"/>';
+    });
+    if (b.kind === 'kada') {
+      for (var i = 1; i < 10; i++) {
+        var a = Math.PI * (i / 10);
+        out += '<circle cx="' + (cx - rx * Math.cos(a)).toFixed(1) + '" cy="' + (116 + 6 + ry * Math.sin(a)).toFixed(1) + '" r="1.3" fill="#fff" fill-opacity=".75"/>';
+      }
+    } else if (b.kind === 'bracelet') {
+      for (var j = 1; j < 14; j++) {
+        var t = Math.PI * (j / 14);
+        out += '<ellipse cx="' + (cx - rx * Math.cos(t)).toFixed(1) + '" cy="' + (122 + 1.8 + ry * Math.sin(t)).toFixed(1) + '" rx="2.6" ry="2" fill="none" stroke="#000" stroke-opacity=".35" stroke-width=".7"/>';
+      }
+      out += '<rect x="' + (cx - 4) + '" y="' + (122 + ry - 1) + '" width="8" height="5" rx="1.5" fill="url(#' + fab + ')" stroke="#000" stroke-opacity=".35" stroke-width=".7"/>';
+    }
+    return out + '</svg>';
+  }
+  // Room = the bangle's inside width − the shopper's hand (mm).
+  function bangleRoom(mm) {
+    var v = Math.round(mm * 10) / 10;
+    var pos = Math.max(4, Math.min(96, ((v + 2) / 8) * 100)); // −2 mm … +6 mm across the bar
+    if (v < 0) return { pos: pos, zone: 'tight', text: Math.abs(v) + ' mm smaller than your hand — hard to slip on' };
+    if (v <= 2.5) return { pos: pos, zone: 'right', text: (v === 0 ? 'Exact fit' : v + ' mm room') + ' — slides on, sits well' };
+    return { pos: pos, zone: 'roomy', text: v + ' mm extra — loose on the wrist' };
+  }
+
   // A soft, filled mannequin. Wider with body-mass index and the chosen build, taller with height.
   // With dress = { kind, image, fit } it wears that garment.
   function figureSvg(heightCm, weightKg, build, size, dress) {
@@ -722,6 +806,7 @@
       image: root.getAttribute('data-product-image') || '',
     };
     if (product.image.indexOf('//') === 0) product.image = 'https:' + product.image;
+    product.bangle = bangleKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.ring = ringKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.shoe = shoeKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
     product.garment = garmentKind(product.title, product.type, (root.getAttribute('data-tags') || '').replace(/\|/g, ' '));
@@ -1593,6 +1678,26 @@
           var rme = el('div', 'ccf-sf-me');
           rme.appendChild(el('span', null, shortMeasure()));
           av.appendChild(rme);
+        } else if (M && settings.storeType === 'bangles') {
+          // The bangles worn on a wrist, with a "Wearing 2.6" chip and a fit meter.
+          var bSizes = chartSizes();
+          var bAt = bSizes.indexOf(String(r.size));
+          av = el('div', 'ccf-sf-pvis is-bangle');
+          av.setAttribute('role', 'img');
+          av.setAttribute('aria-label', (product.title || 'These bangles') + ' in size ' + pick + ' on your wrist');
+          av.insertAdjacentHTML('beforeend', bangleSvg({
+            kind: product.bangle, image: product.image,
+            fit: bAt === -1 ? 0 : bSizes.indexOf(String(pick)) - bAt,
+          }));
+          var bw = el('span', 'ccf-sf-wearing');
+          bw.appendChild(el('span', 'ccf-sf-wdot'));
+          bw.appendChild(document.createTextNode('Wearing ' + pick));
+          av.appendChild(bw);
+          var bRow = M.chart.filter(function (c) { return String(c.size) === String(pick); })[0];
+          if (bRow) av.appendChild(fitMeter(bangleRoom(bRow.value - measuredValue())));
+          var bme = el('div', 'ccf-sf-me');
+          bme.appendChild(el('span', null, shortMeasure()));
+          av.appendChild(bme);
         } else if (M) {
           av = el('div', 'ccf-sf-pvis');
           if (product.image) {
@@ -1789,5 +1894,5 @@
   document.addEventListener('shopify:section:load', start);
 
   // Exposed for tests
-  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind, shoeKind: shoeKind, toeRoom: toeRoom, ringKind: ringKind, ringRoom: ringRoom };
+  window.__ccfSizeFinder = { selectSizeOnPage: selectSizeOnPage, garmentKind: garmentKind, shoeKind: shoeKind, toeRoom: toeRoom, ringKind: ringKind, ringRoom: ringRoom, bangleKind: bangleKind, bangleRoom: bangleRoom };
 })();

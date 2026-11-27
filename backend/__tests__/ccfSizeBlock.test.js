@@ -765,3 +765,53 @@ describe('ccf-size.js — rings worn on a finger', () => {
     expect(room(2.4)).toMatchObject({ zone: 'roomy', text: '2.4 mm extra — may slip' });
   });
 });
+
+describe('ccf-size.js — bangles worn on a wrist', () => {
+  const BANGLES = {
+    type: 'bangles', value: 'Hand width', unit: 'mm', min: 48, max: 80, step: 0.5, start: 60,
+    title: 'Measure your hand', text: 'Thumb and little finger together.', howTo: ['a', 'b', 'c'], caption: 'Measure your hand',
+    alt: { label: 'A bangle that fits', value: 'Inside width of the bangle', min: 48, max: 80, step: 0.5, start: 60 },
+    fit: { right: 'Slides on easily and sits well', roomy: 'A little loose on the wrist' },
+    chart: [{ size: '2.4', value: 57.2 }, { size: '2.6', value: 60.3 }, { size: '2.8', value: 63.5 }],
+  };
+  const PAGE = `
+    <div class="shopify-section">
+      <form action="/cart/add">
+        <fieldset><legend>Size</legend>
+          <input type="radio" name="Size" value="2.4" checked><input type="radio" name="Size" value="2.6"><input type="radio" name="Size" value="2.8">
+        </fieldset>
+        <button type="submit" name="add">Add to cart</button>
+      </form>
+      <div id="ccf-sf-root" data-shop="demo.myshopify.com" data-tags="" data-size-option="Size" data-size-values="2.4|2.6|2.8"
+           data-product-title="Glass Bangle Set" data-product-image="//cdn.shopify.com/b.jpg" data-design-mode="false"></div>
+    </div>`;
+
+  test('result: the set worn on the wrist, product photo, "Wearing 2.6", fit meter; a bigger size → looser', async () => {
+    await load({ settings: { ...SETTINGS, storeType: 'bangles', genders: [], measure: BANGLES }, pageHtml: PAGE,
+      recommend: { ok: true, size: '2.6', outOfRange: false, reasons: [{ area: 'fit', status: 'right', value: 60.3 }] } });
+    open();
+    q('.ccf-sf-main').click();
+    await flush(); await flush(); await flush();
+    expect(q('.ccf-sf-pvis.is-bangle .ccf-sf-bangle').getAttribute('data-kind')).toBe('set');
+    expect(q('.ccf-sf-bangle pattern image').getAttribute('href')).toBe('https://cdn.shopify.com/b.jpg');
+    expect(q('.ccf-sf-pvis .ccf-sf-wearing').textContent).toBe('Wearing 2.6');
+    expect(q('.ccf-sf-toetext').textContent).toBe('0.3 mm room — slides on, sits well');
+    expect(q('.ccf-sf-pvis').getAttribute('aria-label')).toBe('Glass Bangle Set in size 2.6 on your wrist');
+    btn('2.8 — Looser').click();
+    expect(q('.ccf-sf-toetext').textContent).toBe('3.5 mm extra — loose on the wrist');
+    expect(q('.ccf-sf-toe').classList.contains('is-roomy')).toBe(true);
+  });
+
+  test('style from title / type / tags; unknown → single bangle; room words', async () => {
+    await load();
+    const kind = window.__ccfSizeFinder.bangleKind;
+    expect(kind('Gold Plated Kada', '', '')).toBe('kada');
+    expect(kind('Silver Charm Bracelet', '', '')).toBe('bracelet');
+    expect(kind('Bridal Chooda', '', '')).toBe('set');
+    expect(kind('Antique Bangles', '', '')).toBe('bangle');
+    expect(kind('Something', '', '')).toBe('bangle');
+    const room = window.__ccfSizeFinder.bangleRoom;
+    expect(room(-1)).toMatchObject({ zone: 'tight', text: '1 mm smaller than your hand — hard to slip on' });
+    expect(room(0)).toMatchObject({ zone: 'right', text: 'Exact fit — slides on, sits well' });
+  });
+});

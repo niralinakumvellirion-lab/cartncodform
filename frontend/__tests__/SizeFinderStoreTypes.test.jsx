@@ -188,3 +188,17 @@ describe('rings preview', () => {
     expect(frame.querySelector('.sfp-toe')).toHaveTextContent('Exact fit — comfortable');
   });
 });
+
+describe('bangles preview', () => {
+  it('the result shows the sample bangle set on a wrist with "Wearing" and a fit meter', async () => {
+    load({ storeType: 'bangles', enabled: true });
+    apiSend.mockImplementation((url, method, body) =>
+      Promise.resolve(url.endsWith('/preview') ? { size: '2.6', outOfRange: false, reasons: [{ area: 'fit', status: 'right' }] } : { settings: body.settings }));
+    render(<SizeFinderScreen shop={SHOP} />);
+    const frame = await screen.findByTestId('preview-frame');
+    await within(frame).findByText(/Best match/);
+    expect(frame.querySelector('.sfp-pvis.is-bangle .sfp-bangle')).toHaveAttribute('data-kind', 'set');
+    expect(frame.querySelector('.sfp-wearing')).toHaveTextContent('Wearing 2.6');
+    expect(frame.querySelector('.sfp-toe')).toHaveTextContent('0.3 mm room — slides on, sits well');
+  });
+});
