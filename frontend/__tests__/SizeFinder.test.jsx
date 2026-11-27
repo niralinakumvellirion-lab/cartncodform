@@ -27,6 +27,11 @@ async function renderScreen() {
   await screen.findByRole('switch', { name: 'Turn on Find my size' });
 }
 
+// Open a step in the step bar (Size chart · Button · Shopper features · Words · Go live).
+function goStep(name) {
+  fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${name}`) }));
+}
+
 async function saved() {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   // The preview also calls apiSend (POST …/preview); the save is the PUT.
@@ -47,7 +52,9 @@ describe('SizeFinder screen', () => {
 
   it('tag and button text are saved', async () => {
     await renderScreen();
+    goStep('Go live');
     fireEvent.change(screen.getByLabelText('Product tag'), { target: { value: 'size-finder' } });
+    goStep('Button');
     fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Which size am I?' } });
     const s = await saved();
     expect(s.enabled).toBe(true);
@@ -115,6 +122,7 @@ describe('live preview (view only)', () => {
     const rows = Array.from(screen.getByTestId('preview-frame').querySelectorAll('.sfp-size')).map((r) => r.textContent);
     expect(rows).toEqual(['SFits close', 'MRecommended']);
 
+    goStep('Button');
     fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Which size?' } });
     expect(screen.getByTestId('preview-card')).toHaveTextContent('Which size?');
   });
@@ -122,6 +130,7 @@ describe('live preview (view only)', () => {
   it('nothing inside the store frame can be clicked or typed in', async () => {
     await renderScreen();
     await screen.findByLabelText('Recommended size');
+    goStep('Go live'); // both previews
     const frame = screen.getByTestId('preview-frame');
     expect(frame.querySelectorAll('button, input, select, textarea, a')).toHaveLength(0);
     expect(frame).toHaveAttribute('inert');
@@ -154,6 +163,8 @@ describe('live preview (view only)', () => {
   it('both charts empty → explains shoppers will not see the button', async () => {
     apiGet.mockResolvedValue({ settings: { ...SETTINGS, charts: { women: [], men: [] } } });
     render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByRole('tablist', { name: 'Set up steps' });
+    goStep('Button');
     expect(await screen.findByText(/Both size charts are empty/)).toBeInTheDocument();
   });
 });
@@ -161,6 +172,7 @@ describe('live preview (view only)', () => {
 describe('button on the product page', () => {
   it('button text and caption are edited in the admin, shown in the preview and saved', async () => {
     await renderScreen();
+    goStep('Button');
     expect(screen.queryByLabelText('Card heading')).toBeNull(); // the reel-style button has no heading
     fireEvent.change(screen.getByLabelText('Caption under the button'), { target: { value: 'Answer 3 questions' } });
     fireEvent.change(screen.getByLabelText('Button text'), { target: { value: 'Check size' } });
@@ -174,6 +186,7 @@ describe('button on the product page', () => {
 
   it('empty fields show the default words in the preview', async () => {
     await renderScreen();
+    goStep('Button');
     fireEvent.change(screen.getByLabelText('Button text'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Caption under the button'), { target: { value: '' } });
     const card = screen.getByTestId('preview-card');
@@ -183,6 +196,7 @@ describe('button on the product page', () => {
 
   it('button style and corners: shown in the preview and saved', async () => {
     await renderScreen();
+    goStep('Button');
     const cta = () => screen.getByTestId('preview-card').querySelector('.sfp-trigger');
     expect(cta().style.borderRadius).toBe('999px');
     fireEvent.click(screen.getByRole('button', { name: 'Outline' }));
@@ -210,6 +224,7 @@ describe('preview like the storefront "Try it on me" sheet', () => {
   it('two previews: the button, and the sheet with Base / Height & weight / Build / Creating / Result', async () => {
     const { container } = render(<SizeFinderScreen shop={SHOP} />);
     await screen.findByLabelText('Recommended size');
+    goStep('Go live');
     expect(screen.getByText('Button on the product page', { selector: '.sfp-blocktitle' })).toBeInTheDocument();
     expect(screen.getByText('Size preview', { selector: '.sfp-blocktitle' })).toBeInTheDocument();
     const frame = () => screen.getByTestId('preview-frame');
@@ -233,6 +248,7 @@ describe('preview like the storefront "Try it on me" sheet', () => {
 
   it('corners: number box and presets', async () => {
     await renderScreen();
+    goStep('Button');
     fireEvent.change(screen.getByLabelText('Button corner radius in px'), { target: { value: '30' } });
     expect(screen.getByLabelText('Button corner radius in px')).toHaveValue(24);
     fireEvent.change(screen.getByLabelText('Button corner radius in px'), { target: { value: '10' } });
@@ -250,10 +266,14 @@ describe('size advisor words and options', () => {
     await renderScreen();
     await screen.findByLabelText('Recommended size');
     const frame = () => screen.getByTestId('preview-frame');
+    goStep('Words');
     fireEvent.focus(screen.getByLabelText('Man label'));
     fireEvent.change(screen.getByLabelText('Man label'), { target: { value: 'Gents' } });
     expect(frame()).toHaveTextContent('Gents');
+    expect(screen.getByRole('tab', { name: /^Words/ })).toHaveTextContent('1 changed');
+    goStep('Size chart');
     expect(screen.getByRole('button', { name: 'Gents (1)' })).toBeInTheDocument(); // chart tab follows
+    goStep('Words');
     fireEvent.focus(screen.getByLabelText('Step 3 heading'));
     fireEvent.change(screen.getByLabelText('Step 3 heading'), { target: { value: 'Your body type' } });
     expect(frame()).toHaveTextContent('Your body type');
@@ -273,6 +293,8 @@ describe('size advisor words and options', () => {
   it('on/off parts hide them in the preview and are saved', async () => {
     const { container } = render(<SizeFinderScreen shop={SHOP} />);
     await screen.findByLabelText('Recommended size');
+    goStep('Shopper features');
+    expect(screen.getByRole('tab', { name: /^Shopper features/ })).toHaveTextContent('4 of 4 on');
     fireEvent.click(screen.getByRole('switch', { name: 'Show Likely size' }));
     expect(container.querySelector('.sfp-live')).toBeNull();
     fireEvent.click(screen.getByRole('switch', { name: 'Show Add to cart button' }));
@@ -287,12 +309,12 @@ describe('on / off', () => {
     apiGet.mockResolvedValue({ settings: { ...JSON.parse(JSON.stringify(SETTINGS)), enabled: false } });
     const { container } = render(<SizeFinderScreen shop={SHOP} />);
     await screen.findByText('Find my size is off');
-    expect(screen.queryByLabelText('Product tag')).toBeNull();
+    expect(screen.queryByRole('tablist', { name: 'Set up steps' })).toBeNull();
     expect(screen.queryByLabelText('Live preview')).toBeNull();
     expect(container.querySelector('.sf-side')).toBeNull();
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Turn on Find my size' }));
-    expect(screen.getByLabelText('Product tag')).toBeInTheDocument();
+    expect(screen.getByRole('tablist', { name: 'Set up steps' })).toBeInTheDocument();
     expect(screen.getByLabelText('Live preview')).toBeInTheDocument();
     const s = await saved();
     expect(s.enabled).toBe(true);
@@ -301,43 +323,59 @@ describe('on / off', () => {
   it('switching Off hides everything and saves enabled: false', async () => {
     await renderScreen();
     fireEvent.click(screen.getByRole('switch', { name: 'Turn on Find my size' }));
-    expect(screen.queryByLabelText('Product tag')).toBeNull();
+    expect(screen.queryByRole('tablist', { name: 'Set up steps' })).toBeNull();
     expect(screen.queryByLabelText('Live preview')).toBeNull();
     const s = await saved();
     expect(s.enabled).toBe(false);
   });
 });
 
-describe('preview follows the section being edited', () => {
-  it('both at first; card section → only the card; size sections → only the size preview; Show both', async () => {
+describe('steps', () => {
+  it('five steps with a live status; one step open at a time; Next / back; the preview follows the step', async () => {
     await renderScreen();
     await screen.findByLabelText('Recommended size');
-    expect(screen.getByTestId('preview-card')).toBeInTheDocument();
-    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.querySelector('b').textContent)).toEqual(['Size chart', 'Button', 'Shopper features', 'Words', 'Go live']);
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+    expect(tabs[0]).toHaveTextContent('3 sizes');
+    expect(tabs[1]).toHaveTextContent('Outline · Round');
+    expect(tabs[3]).toHaveTextContent('Default words');
+    expect(tabs[4]).toHaveTextContent('All products with sizes');
 
-    fireEvent.focus(screen.getByLabelText('Button text'));
+    // Size chart → only the size preview
+    expect(screen.getByRole('tabpanel', { name: 'Size chart' })).toBeInTheDocument();
+    expect(screen.queryByTestId('preview-card')).toBeNull();
+    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Button text')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next: Button →' }));
+    expect(screen.getByRole('tabpanel', { name: 'Button' })).toBeInTheDocument();
     expect(screen.getByTestId('preview-card')).toBeInTheDocument();
     expect(screen.queryByTestId('preview-frame')).toBeNull();
     expect(screen.getByText(/Showing the button you are editing/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show both' })).toBeNull();
 
-    fireEvent.mouseDown(screen.getByRole('button', { name: 'Outline' })); // buttons count too
-    expect(screen.queryByTestId('preview-frame')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '← Size chart' }));
+    expect(screen.getByRole('tabpanel', { name: 'Size chart' })).toBeInTheDocument();
 
-    fireEvent.focus(screen.getByLabelText('Row 1 Chest')); // size chart
-    expect(screen.queryByTestId('preview-card')).toBeNull();
-    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
-
-    fireEvent.focus(screen.getByLabelText('Step 1 heading')); // size advisor words
-    expect(screen.queryByTestId('preview-card')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Show both' }));
+    goStep('Go live'); // both, plus where it shows and the theme block
     expect(screen.getByTestId('preview-card')).toBeInTheDocument();
     expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
+    expect(screen.getByLabelText('Product tag')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Next:/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Product tag'), { target: { value: 'sizes' } });
+    expect(screen.getByRole('tab', { name: /^Go live/ })).toHaveTextContent('Tag: sizes');
+  });
 
-    fireEvent.focus(screen.getByLabelText('Button text'));
-    fireEvent.focus(screen.getByLabelText('Product tag')); // "Where it shows" → both again
-    expect(screen.getByTestId('preview-frame')).toBeInTheDocument();
-    expect(screen.getByTestId('preview-card')).toBeInTheDocument();
+  it('Words: Reset to default words appears once a word is changed and puts them back', async () => {
+    await renderScreen();
+    goStep('Words');
+    expect(screen.queryByRole('button', { name: 'Reset to default words' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Panel title'), { target: { value: 'Size help' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to default words' }));
+    expect(screen.getByLabelText('Panel title')).toHaveValue('Find my size');
+    const s = await saved();
+    expect(s.texts).toEqual({});
   });
 });
 
@@ -350,6 +388,7 @@ describe('preview highlights the field being edited', () => {
     expect(lit()).toHaveLength(0);
     expect(screen.queryByTestId('preview-editing')).toBeNull();
 
+    goStep('Button');
     fireEvent.focus(screen.getByLabelText('Caption under the button'));
     expect(lit().map((e) => e.className)).toEqual([expect.stringContaining('sfp-caption')]);
     expect(screen.getByTestId('preview-editing')).toHaveTextContent('Editing: Caption under the button');
@@ -360,6 +399,7 @@ describe('preview highlights the field being edited', () => {
     expect(screen.getByTestId('preview-editing')).toHaveTextContent('Button style');
 
     // Woman label → only the Woman row on the avatar base screen
+    goStep('Words');
     fireEvent.focus(screen.getByLabelText('Woman label'));
     expect(lit()).toHaveLength(1);
     expect(lit()[0]).toHaveTextContent('Woman');
@@ -375,11 +415,13 @@ describe('preview highlights the field being edited', () => {
     await renderScreen();
     await screen.findByLabelText('Recommended size');
 
+    goStep('Shopper features');
     fireEvent.mouseDown(screen.getByRole('switch', { name: 'Show Remember my size' }));
     fireEvent.click(screen.getByRole('switch', { name: 'Show Remember my size' }));
     fireEvent.click(screen.getByRole('switch', { name: 'Show Remember my size' })); // back on
     expect(lit()[0].className).toContain('sfp-check');
 
+    goStep('Size chart');
     fireEvent.focus(screen.getByLabelText('Row 1 Chest'));
     await screen.findByLabelText('Recommended size'); // jumped to the result
     expect(lit().map((e) => e.className.split(' ')[0])).toEqual(['sfp-sizes']);
@@ -389,6 +431,7 @@ describe('preview highlights the field being edited', () => {
     expect(lit().every((e) => e.className.includes('sfp-units'))).toBe(true);
     expect(lit()).toHaveLength(2);
 
+    goStep('Go live');
     fireEvent.focus(screen.getByLabelText('Product tag')); // the whole product-page block
     expect(lit()[0].className).toContain('sfp-page');
   });

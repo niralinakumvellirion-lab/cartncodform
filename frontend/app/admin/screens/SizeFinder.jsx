@@ -51,8 +51,8 @@ export default function SizeFinderScreen({ shop }) {
   const [lastQuery, setLastQuery] = useState('');
   const [gender, setGender] = useState('women');
   const [previewView, setPreviewView] = useState(5);
-  // Which preview to show: the part the seller is editing ('card' / 'advisor'), or 'both'.
-  const [previewShow, setPreviewShow] = useState('both');
+  // The step open on the left: chart · button · features · words · live.
+  const [tab, setTab] = useState('chart');
   const [highlight, setHighlight] = useState(null); // { key, label } of the field being edited
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -166,9 +166,8 @@ export default function SizeFinderScreen({ shop }) {
 
   // Clicking or typing anywhere in a section shows that section's preview on the right.
   // The field (data-hl) being edited is highlighted in the preview, which also jumps to its step.
-  function focusArea(area) {
+  function focusArea() {
     const pick = (e) => {
-      setPreviewShow(area);
       const el = e.target && e.target.closest ? e.target.closest('[data-hl]') : null;
       if (!el) { setHighlight(null); return; }
       const key = el.getAttribute('data-hl');
@@ -182,6 +181,52 @@ export default function SizeFinderScreen({ shop }) {
   const options = { ...ADVISOR_OPTION_DEFAULTS, ...(settings.options || {}) };
   function setText(k, v) { set({ texts: { ...(settings.texts || {}), [k]: v } }); }
   function setOption(k, v) { set({ options: { ...options, [k]: v } }); }
+
+  // Steps on the left, each with a short live status. The preview follows the open step.
+  const chartCount = measure ? measureRows.length : (settings.charts.women || []).length + (settings.charts.men || []).length;
+  const featuresOn = Object.keys(ADVISOR_OPTION_DEFAULTS).filter((k) => options[k]).length;
+  const wordsChanged = Object.keys(ADVISOR_TEXT_DEFAULTS).filter((k) => settings.texts && typeof settings.texts[k] === 'string'
+    && settings.texts[k].trim() && settings.texts[k].trim() !== ADVISOR_TEXT_DEFAULTS[k]).length;
+  const STYLE_NAME = { filled: 'Filled', outline: 'Outline', soft: 'Soft' };
+  const steps = [
+    { id: 'chart', title: 'Size chart', status: chartCount ? `${chartCount} sizes` : 'No sizes yet', done: chartCount > 0 },
+    { id: 'button', title: 'Button', status: `${STYLE_NAME[settings.buttonStyle] || 'Outline'} · ${radiusLabel(settings.buttonRadius)}`, done: true },
+    { id: 'features', title: 'Shopper features', status: `${featuresOn} of 4 on`, done: true },
+    { id: 'words', title: 'Words', status: wordsChanged ? `${wordsChanged} changed` : 'Default words', done: true, optional: true },
+    { id: 'live', title: 'Go live', status: settings.productTag ? `Tag: ${settings.productTag}` : 'All products with sizes', done: true },
+  ];
+  const stepAt = steps.findIndex((x) => x.id === tab);
+  function goStep(id) {
+    setTab(id);
+    setHighlight(null);
+    if (id === 'chart') setPreviewView(mv(5));
+    if (id === 'words') setPreviewView(mv(1));
+  }
+  const previewShow = tab === 'button' ? 'card' : tab === 'live' ? 'both' : 'advisor';
+
+  // A feature the shopper sees, as a tile with its switch.
+  function featureTile(k, view, title, text, icon) {
+    const on = options[k];
+    const name = title.replace(/[“”]/g, '');
+    return (
+      <div key={k} className={`sf-tile${on ? ' is-on' : ''}`} data-hl={k} data-hl-label={name}>
+        <span className="sf-tileicon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{FEATURE_ICONS[icon]}</svg>
+        </span>
+        <span className="sf-tilecopy"><b>{title}</b><small>{text}</small></span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={`Show ${name}`}
+          onClick={() => { setOption(k, !on); setPreviewView(mv(view)); }}
+          style={{ ...ui.toggle, background: on ? '#303030' : '#C9C9C9', flexShrink: 0 }}
+        >
+          <span style={{ ...ui.knob, transform: on ? 'translateX(20px)' : 'translateX(0)' }} />
+        </button>
+      </div>
+    );
+  }
 
   // Small field components share the page state; focusing one shows that step in the preview.
   function textField(label, k, view, hint) {
@@ -201,43 +246,30 @@ export default function SizeFinderScreen({ shop }) {
       </label>
     );
   }
-  function optionSwitch(k, view, title, text) {
-    const on = options[k];
-    return (
-      <div key={k} style={ui.toggleRow} data-hl={k} data-hl-label={title.replace(/[“”]/g, '')}>
-        <span>
-          <span style={ui.sectionTitle}>{title}</span>
-          <span style={{ ...ui.sectionText, fontSize: 12.5 }}>{text}</span>
-        </span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-label={`Show ${title.replace(/[“”]/g, '')}`}
-          onClick={() => { setOption(k, !on); setPreviewView(mv(view)); }}
-          style={{ ...ui.toggle, background: on ? '#303030' : '#C9C9C9', flexShrink: 0 }}
-        >
-          <span style={{ ...ui.knob, transform: on ? 'translateX(20px)' : 'translateX(0)' }} />
-        </button>
-      </div>
-    );
-  }
+
+  const resetWords = wordsChanged > 0 && (
+    <button type="button" className="sf-reset" onClick={() => set({ texts: {} })}>Reset to default words</button>
+  );
 
   return (
     <div style={ui.page}>
       <style>{LAYOUT_CSS}</style>
       <div className={`sf-layout${settings.enabled && isOn && !showPicker ? '' : ' is-off'}`} ref={layoutRef}>
       <div className="sf-main">
-      <div style={ui.head}>
-        <div>
+      <div className={showPicker ? '' : 'sf-headwrap'}>
+      <div style={ui.head} className="sf-head">
+        <span className="sf-headicon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 15.5 15.5 3 21 8.5 8.5 21z" /><path d="m7 12 2 2M10 9l2 2M13 6l2 2" /></svg>
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={ui.h1}>Find my size</h1>
           <p style={{ ...ui.muted, margin: '0 0 10px' }}>
             {showPicker
               ? 'Help shoppers pick the right size before they buy — set up for what your store sells.'
               : measure
-              ? `A size helper on your product pages: shoppers measure (${measure.value.toLowerCase()}) and get the right size from your chart.`
+              ? `Shoppers measure their ${measure.value.toLowerCase()} and get the right size from your chart.`
               : storeType === 'clothing'
-                ? 'A “Try it on me” size advisor on your product pages: shoppers pick an avatar, enter height and weight, choose a build and get the right size from your chart.'
+                ? 'Shoppers enter height, weight and build, and get the right size from your chart.'
                 : 'Help shoppers pick the right size before they buy — set up for what your store sells.'}
           </p>
           {isOn && !showPicker && (
@@ -265,6 +297,8 @@ export default function SizeFinderScreen({ shop }) {
         </span>
         )}
       </div>
+      {!showPicker && <StoreTypeCard type={typeInfo} onChange={() => setChoosing(true)} />}
+      </div>
       {showPicker ? (
         <StoreTypePicker
           catalog={meta.storeTypes}
@@ -273,7 +307,6 @@ export default function SizeFinderScreen({ shop }) {
           onCancel={storeType !== '' ? () => setChoosing(false) : null}
         />
       ) : (<>
-      <StoreTypeCard type={typeInfo} onChange={() => setChoosing(true)} />
       {storeType === 'none' ? (
         <NotNeededCard shop={shop} query={lastQuery} />
       ) : !settings.enabled ? (
@@ -289,7 +322,25 @@ export default function SizeFinderScreen({ shop }) {
           <button type="button" style={ui.save} onClick={() => set({ enabled: true })}>Turn on Find my size</button>
         </section>
       ) : (<>
-      <section style={ui.card} {...focusArea('both')}>
+      <nav className="sf-steps" role="tablist" aria-label="Set up steps">
+        {steps.map((st, i) => (
+          <button
+            key={st.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === st.id}
+            aria-controls="sf-panel"
+            className={`sf-step${tab === st.id ? ' is-on' : ''}`}
+            onClick={() => goStep(st.id)}
+          >
+            <span className={`sf-stepnum${st.done && tab !== st.id ? ' is-done' : ''}`} aria-hidden="true">{st.done && tab !== st.id ? '✓' : i + 1}</span>
+            <span className="sf-stepcopy"><b>{st.title}</b><small>{st.status}</small></span>
+          </button>
+        ))}
+      </nav>
+      <div id="sf-panel" role="tabpanel" aria-label={steps[stepAt].title} className="sf-panel">
+      {tab === 'live' && (
+      <section style={ui.card} {...focusArea()}>
         <SectionHead icon="pin" title="Where it shows" text="Every product that has a Size option. Add a tag to show it only on some products." />
         <label style={ui.field} data-hl="productTag" data-hl-label="Product tag">Only on products with this tag (optional)
           <input
@@ -303,8 +354,10 @@ export default function SizeFinderScreen({ shop }) {
           />
         </label>
       </section>
+      )}
 
-      <section style={ui.card} aria-label="Button on the product page" {...focusArea('card')}>
+      {tab === 'button' && (
+      <section style={ui.card} aria-label="Button on the product page" {...focusArea()}>
         <SectionHead icon="card" title="Button on the product page" text="A full-width button right under the Size buttons. It opens the size advisor. The preview updates as you type." />
         <label style={ui.field} data-hl="buttonText" data-hl-label="Button text">Button text
           <input
@@ -407,10 +460,23 @@ export default function SizeFinderScreen({ shop }) {
           </span>
         </div>
       </section>
+      )}
 
-      {measure ? (
-      <section style={ui.card} aria-label="Size helper" {...focusArea('advisor')}>
-        <SectionHead icon="panel" title="Size helper" text={`The panel that opens from the button: ${measure.title.toLowerCase()}, then the recommended size. Click a box and the preview jumps to that screen.`} />
+      {tab === 'features' && (
+      <section style={ui.card} aria-label="Shopper features" {...focusArea()}>
+        <SectionHead icon="spark" title="Shopper features" text="What shoppers can use in the size helper. Turn off anything you don't want — the preview shows the change." />
+        <div className="sf-tiles">
+          {featureTile('liveEstimate', measure ? 1 : 2, 'Likely size', measure ? 'Shows a size while shoppers move the slider.' : 'Shows a size while shoppers move the height and weight sliders.', 'eye')}
+          {featureTile('rememberSize', measure ? 1 : 3, '“Remember my size”', 'Saves the size for next time — never the measurements.', 'save')}
+          {featureTile('addToBag', 5, 'Add to cart button', 'Picks the size and adds it to the cart in one tap.', 'cart')}
+          {featureTile('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.', 'table')}
+        </div>
+      </section>
+      )}
+
+      {tab === 'words' && (measure ? (
+      <section style={ui.card} aria-label="Size helper" {...focusArea()}>
+        <SectionHead icon="panel" title="Words" text="Optional — the default words already work. Click a box and the preview jumps to that screen." />
         <p style={ui.group}>Panel</p>
         <div className="sf-grid2">
           {textField('Panel title', 'advisorTitle', 1)}
@@ -421,17 +487,11 @@ export default function SizeFinderScreen({ shop }) {
           {textField('Result heading', 'resultTitle', 5)}
           {textField('Add to cart button', 'addToBagText', 5, '{size} becomes the size, e.g. 7')}
         </div>
-        <p style={ui.group}>Show in the size helper</p>
-        <div style={ui.toggles}>
-          {optionSwitch('liveEstimate', 1, 'Likely size', 'Shows a likely size while shoppers move the slider.')}
-          {optionSwitch('rememberSize', 1, '“Remember my size”', 'Lets shoppers save their size for next time.')}
-          {optionSwitch('addToBag', 5, 'Add to cart button', 'Picks the size and adds it to the cart in one tap.')}
-          {optionSwitch('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.')}
-        </div>
+        {resetWords}
       </section>
       ) : (
-      <section style={ui.card} aria-label="Size advisor" {...focusArea('advisor')}>
-        <SectionHead icon="panel" title="Size advisor" text="The panel that opens from the button: avatar base, height & weight, build, then the recommended size. Click a box and the preview jumps to that screen." />
+      <section style={ui.card} aria-label="Size advisor" {...focusArea()}>
+        <SectionHead icon="panel" title="Words" text="Optional — the default words already work. Click a box and the preview jumps to that screen." />
 
         <p style={ui.group}>Panel</p>
         <div className="sf-grid2">
@@ -467,19 +527,12 @@ export default function SizeFinderScreen({ shop }) {
           {textField('Result heading', 'resultTitle', 5)}
           {textField('Add to cart button', 'addToBagText', 5, '{size} becomes the size, e.g. M')}
         </div>
-
-        <p style={ui.group}>Show in the size advisor</p>
-        <div style={ui.toggles}>
-          {optionSwitch('liveEstimate', 2, 'Likely size', 'Shows a likely size while shoppers move the sliders (step 2).')}
-          {optionSwitch('rememberSize', 3, '“Remember my size”', 'Lets shoppers save their size for next time (step 3).')}
-          {optionSwitch('addToBag', 5, 'Add to cart button', 'Picks the size and adds it to the cart in one tap.')}
-          {optionSwitch('sizeChart', 5, '“View size chart” link', 'Shows your size chart under the result.')}
-        </div>
+        {resetWords}
       </section>
-      )}
+      ))}
 
-      {measure ? (
-      <section style={ui.card} aria-label="Size chart" {...focusArea('advisor')}>
+      {tab === 'chart' && (measure ? (
+      <section style={ui.card} aria-label="Size chart" {...focusArea()}>
         <SectionHead icon="chart" title="Size chart" text={`${measure.value} for each size, in ${measure.unit}, smallest first.`} />
         <p style={ui.tip}>
           A starter Indian chart is filled in. Size names must match the sizes on your products (for example “7” or “UK 7”).
@@ -525,7 +578,7 @@ export default function SizeFinderScreen({ shop }) {
         )}
       </section>
       ) : (
-      <section style={ui.card} aria-label="Size charts" {...focusArea('advisor')}>
+      <section style={ui.card} aria-label="Size charts" {...focusArea()}>
         <div style={ui.row}>
           <SectionHead icon="chart" title="Size charts" text="Body measurements for each size." />
           <span style={ui.seg} role="group" aria-label="Unit" data-hl="unit" data-hl-label="Unit (cm / in)">
@@ -586,8 +639,9 @@ export default function SizeFinderScreen({ shop }) {
           </button>
         )}
       </section>
-      )}
+      ))}
 
+      {tab === 'live' && (
       <ThemeBlockSetup
         shop={shop}
         handle="size-finder"
@@ -595,6 +649,16 @@ export default function SizeFinderScreen({ shop }) {
         place="under the size picker"
         whenLive="Shoppers see the button once Find my size is turned on and saved."
       />
+      )}
+      <div className="sf-stepnav">
+        {stepAt > 0
+          ? <button type="button" className="sf-back" onClick={() => goStep(steps[stepAt - 1].id)}>← {steps[stepAt - 1].title}</button>
+          : <span />}
+        {stepAt < steps.length - 1 && (
+          <button type="button" className="sf-next" onClick={() => goStep(steps[stepAt + 1].id)}>Next: {steps[stepAt + 1].title} →</button>
+        )}
+      </div>
+      </div>
       </>)}
       </>)}
 
@@ -620,7 +684,6 @@ export default function SizeFinderScreen({ shop }) {
             view={previewView}
             onViewChange={setPreviewView}
             show={previewShow}
-            onShowBoth={() => setPreviewShow('both')}
             highlight={highlight}
             storeType={storeType}
             measure={measure}
@@ -637,7 +700,15 @@ export default function SizeFinderScreen({ shop }) {
 // Fields whose preview part lives on one step: editing them opens that step.
 const HL_VIEW = { chart: 5, unit: 2 };
 
+const FEATURE_ICONS = {
+  eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
+  save: <><path d="M5 3h11l3 3v15H5z" /><path d="M8 3v6h8V3M8 21v-7h8v7" /></>,
+  cart: <><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.6L21 8H6" /></>,
+  table: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></>,
+};
+
 const ICONS = {
+  spark: <><rect x="2" y="6" width="20" height="12" rx="6" /><circle cx="16" cy="12" r="3" /></>,
   pin: <path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
   card: <><rect x="3" y="6" width="18" height="12" rx="3" /><path d="M7 12h6M16 12h1" /></>,
   chart: <path d="M3 15.5 15.5 3 21 8.5 8.5 21zM7 12l2 2M10 9l2 2M13 6l2 2" />,
@@ -670,6 +741,41 @@ const LAYOUT_CSS = `
 .sf-main tbody tr:hover td{background:#FAFAFA}
 .sf-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
 @media (max-width:640px){.sf-grid2{grid-template-columns:minmax(0,1fr)}}
+.sf-head{background:#fff;border:1px solid #E3E3E3;border-radius:14px;padding:18px 20px;box-shadow:0 1px 2px rgba(0,0,0,.04);align-items:center!important}
+.sf-headwrap{background:#fff;border:1px solid #E3E3E3;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.04);overflow:hidden}
+.sf-headwrap .sf-head{border:0;border-radius:0;box-shadow:none}
+.sf-headwrap .stp-chosen{border:0;border-top:1px solid #F0F0F0;border-radius:0;box-shadow:none;background:#FAFAFA;padding:12px 20px}
+.sf-headicon{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#EEF2FF,#E0E7FF);color:#4338CA;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start}
+.sf-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;background:#fff;border:1px solid #E3E3E3;border-radius:14px;padding:5px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+@media (max-width:560px){.sf-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sf-step{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:10px;border:0;border-radius:10px;background:transparent;text-align:left;cursor:pointer;color:#303030;transition:background .15s}
+.sf-step:hover{background:#F6F6F7}
+.sf-step.is-on{background:#303030;color:#fff}
+.sf-stepnum{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:#F1F1F1;color:#303030}
+.sf-stepnum.is-done{background:#DCFCE7;color:#047857}
+.sf-step.is-on .sf-stepnum{background:#fff;color:#303030}
+.sf-stepcopy{display:flex;flex-direction:column;min-width:0}
+.sf-stepcopy{width:100%}
+.sf-stepcopy b{font-size:12.5px;font-weight:600;line-height:1.25}
+.sf-stepcopy small{font-size:11.5px;color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sf-step.is-on .sf-stepcopy small{color:rgba(255,255,255,.75)}
+.sf-panel{display:flex;flex-direction:column;gap:16px}
+.sf-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.sf-tiles{grid-template-columns:minmax(0,1fr)}}
+.sf-tile{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid #E3E3E3;border-radius:12px;background:#FAFAFA;transition:border-color .15s,background .15s}
+.sf-tile.is-on{background:#fff;border-color:#C9C9C9;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.sf-tileicon{width:34px;height:34px;border-radius:10px;background:#F1F1F1;color:#303030;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sf-tile.is-on .sf-tileicon{background:#EEF2FF;color:#4338CA}
+.sf-tilecopy{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
+.sf-tilecopy b{font-size:13.5px;font-weight:600;color:#303030}
+.sf-tilecopy small{font-size:12.5px;color:#616161;line-height:1.4}
+.sf-stepnav{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.sf-back,.sf-next,.sf-reset{border-radius:8px;padding:8px 14px;font-size:13px;font-weight:550;cursor:pointer}
+.sf-back{background:transparent;border:0;color:#616161}
+.sf-back:hover{color:#303030}
+.sf-next{background:#fff;border:1px solid #C9C9C9;color:#303030;box-shadow:0 1px 0 rgba(0,0,0,.05)}
+.sf-next:hover{border-color:#8A8A8A}
+.sf-reset{background:#fff;border:1px solid #D4D4D4;color:#303030;margin-top:4px}
 .sf-savebar{position:sticky;bottom:0;z-index:2;background:rgba(246,246,247,.92);backdrop-filter:blur(6px);padding:12px 0;margin:0!important;border-top:1px solid #E3E3E3}
 @media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static;height:auto!important}.sf-fit{transform:none!important;width:100%!important}}
 `;

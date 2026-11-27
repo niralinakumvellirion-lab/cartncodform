@@ -78,8 +78,9 @@ describe('first visit: search what the store sells', () => {
     expect(await screen.findByRole('region', { name: 'Your store type' })).toHaveTextContent('Shoes & footwear');
     expect(screen.getByRole('switch', { name: 'Turn on Find my size' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('Row 1 Foot length')).toHaveValue(25.4);
-    expect(screen.getByLabelText('Caption under the button')).toHaveValue('Measure your foot · takes 30 seconds');
     expect(screen.getByRole('region', { name: 'Size chart' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /^Button/ }));
+    expect(screen.getByLabelText('Caption under the button')).toHaveValue('Measure your foot · takes 30 seconds');
     const s = await savedSettings();
     expect(s).toMatchObject({ storeType: 'shoes', enabled: true });
   });
@@ -157,6 +158,7 @@ describe('measure types', () => {
     expect(within(frame).getByText('Measure your foot')).toBeInTheDocument();
     expect(within(frame).getByText('How to measure')).toBeInTheDocument();
     expect(within(frame).getByText('25 cm')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /^Button/ }));
     expect(screen.getByTestId('preview-card')).toHaveTextContent('Measure your foot · takes 30 seconds');
   });
 });
